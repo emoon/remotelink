@@ -103,7 +103,7 @@ fn init_packet(dest: &mut [u8], src: &[u8], command: u8) -> usize {
     src.len() + 1
 }
 
-fn client_loop(opts: &Opt, _ip_address: &String) {
+fn client_loop(opts: &Opt, _ip_address: &str) {
     let mut stream = TcpStream::connect("127.0.0.1:8888").expect("Could not connect to server");
 
     if let Some(filename) = opts.filename.as_ref() {
@@ -112,7 +112,7 @@ fn client_loop(opts: &Opt, _ip_address: &String) {
         let mut file = File::open(&filename).unwrap();
 
         init_packet(&mut data, filename.as_bytes(), START_FILE);
-        stream.write(&data).unwrap();
+        stream.write_all(&data).unwrap();
 
         loop {
             let size = file.read(&mut data[1..]).unwrap();
@@ -122,7 +122,7 @@ fn client_loop(opts: &Opt, _ip_address: &String) {
                 data[0] = END_FILE;
             }
 
-            stream.write(&data).unwrap();
+            stream.write_all(&data).unwrap();
 
             if size < chunk_size {
                 break;
