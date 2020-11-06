@@ -1,9 +1,9 @@
+use std::fs::File;
+use std::io::{BufReader, Error, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::io::{Read, BufReader, Error, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
 use std::thread;
-use std::fs::{File};
 use structopt::StructOpt;
 
 #[derive(StructOpt, Debug)]
@@ -48,12 +48,12 @@ fn handle_client(stream: TcpStream) -> Result<(), Error> {
             START_FILE => {
                 let filename = std::str::from_utf8(&data[1..bytes_read]).unwrap();
                 println!("Client is about to send {} (len {})", filename, bytes_read);
-            },
+            }
 
             FILE_CHUNK => {
                 println!("Got file chunk size {}", bytes_read);
                 copy_data(&mut filebuffer, &data[1..bytes_read]);
-            },
+            }
 
             END_FILE => {
                 println!("Got file end chunk size {}", bytes_read);
@@ -68,12 +68,12 @@ fn handle_client(stream: TcpStream) -> Result<(), Error> {
                 std::fs::set_permissions("test", std::fs::Permissions::from_mode(0o700)).unwrap();
 
                 let output = Command::new("./test")
-                                    .output()
-                                    .expect("failed to execute process");
+                    .output()
+                    .expect("failed to execute process");
 
                 println!("status: {}", output.status);
                 std::io::stdout().write_all(&output.stdout).unwrap();
-            },
+            }
 
             _ => (),
         }
