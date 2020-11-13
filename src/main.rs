@@ -1,10 +1,10 @@
 #[macro_use]
 extern crate serde_derive;
 
-mod target;
-mod messages;
 mod host;
+mod messages;
 mod options;
+mod target;
 
 use crate::options::Opt;
 use structopt::StructOpt;
@@ -12,7 +12,7 @@ use structopt::StructOpt;
 fn main() {
     let opt = Opt::from_args();
 
-	/*
+    /*
     if opt.server {
         server_loop(&opt);
     } else if opt.target.is_some() {

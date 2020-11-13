@@ -1,7 +1,7 @@
 //use std::fs::File;
 //use std::io::{BufReader, Error, Read, Write};
-use std::net::{TcpStream};
 use anyhow::Result;
+use std::net::TcpStream;
 
 use crate::messages::*;
 use crate::options::Opt;
@@ -47,6 +47,3 @@ fn host_loop(opts: &Opt, ip_address: &str) -> Result<()> {
     }
     */
 }
-
-
-

@@ -1,8 +1,8 @@
-use std::net::{TcpStream, TcpListener};
-use std::io::{BufReader, Read, Write};
-use anyhow::Result;
-use std::thread;
 use crate::options::*;
+use anyhow::Result;
+use std::io::{BufReader, Read, Write};
+use std::net::{TcpListener, TcpStream};
+use std::thread;
 
 struct Contex {
     stream: TcpStream,
@@ -83,6 +83,3 @@ fn target_loop(_opts: &Opt) {
         }
     }
 }
-
-
-

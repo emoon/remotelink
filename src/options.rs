@@ -14,4 +14,3 @@ pub struct Opt {
     #[structopt(short, long)]
     filename: Option<String>,
 }
-
