@@ -1,6 +1,8 @@
-use std::net::{TcpStream};
+use std::net::{TcpStream, TcpListener};
 use std::io::{BufReader, Read, Write};
-use std::io::{Result};
+use anyhow::Result;
+use std::thread;
+use crate::options::*;
 
 struct Contex {
     stream: TcpStream,
@@ -20,7 +22,7 @@ fn handle_client(stream: TcpStream) -> Result<()> {
     println!("Incoming connection from: {}", stream.peer_addr()?);
     let mut data: [u8; 1024] = [0; 1024];
     let mut stream = BufReader::new(stream);
-    let mut filebuffer = Vec::new();
+    //let mut filebuffer = Vec::new();
 
     loop {
         let bytes_read = { stream.read(&mut data)? };
@@ -30,6 +32,7 @@ fn handle_client(stream: TcpStream) -> Result<()> {
 
         let id = data[0];
 
+        /*
         match id {
             START_FILE => {
                 let filename = std::str::from_utf8(&data[1..bytes_read]).unwrap();
@@ -63,6 +66,7 @@ fn handle_client(stream: TcpStream) -> Result<()> {
 
             _ => (),
         }
+        */
     }
 }
 

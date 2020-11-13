@@ -1,7 +1,7 @@
 //use std::fs::File;
 //use std::io::{BufReader, Error, Read, Write};
 use std::net::{TcpStream};
-use std::io::Result;
+use anyhow::Result;
 
 use crate::messages::*;
 use crate::options::Opt;

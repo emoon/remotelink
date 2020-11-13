@@ -18,9 +18,9 @@ pub enum Messages {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct HandshakeRequest {
-	msg_type: u8,
-	version_major: u8,
-	version_minor: u8,
+	pub msg_type: u8,
+	pub version_major: u8,
+	pub version_minor: u8,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
