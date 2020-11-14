@@ -5,6 +5,7 @@ mod host;
 mod messages;
 mod options;
 mod target;
+mod tests;
 
 use crate::options::Opt;
 use structopt::StructOpt;

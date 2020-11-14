@@ -1,15 +1,15 @@
 use anyhow::Result;
 use bincode;
 use serde::ser::Serialize;
-use std::net::TcpStream;
+use std::io::{Write, Read};
 
 pub const REMOTELINK_MAJOR_VERSION: u8 = 0;
 pub const REMOTELINK_MINOR_VERSION: u8 = 1;
 
 #[repr(u8)]
 pub enum Messages {
-    HandshakeRequest = 0,
-    HandshakeReply = 1,
+    FistbumpRequest = 0,
+    FistbumpReply = 1,
     LaunchExecutableRequest = 2,
     LaunchExecutableReply = 3,
     StopExecutableRequest = 4,
@@ -17,14 +17,14 @@ pub enum Messages {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct HandshakeRequest {
+pub struct FistbumpRequest {
     pub msg_type: u8,
     pub version_major: u8,
     pub version_minor: u8,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct HandshakeReply {
+pub struct FistbumpReply {
     msg_type: u8,
     version_major: u8,
     version_minor: u8,
@@ -56,8 +56,7 @@ pub struct StopExecutableReply {
     msg_type: u8,
 }
 
-// TODO: Use Trait Read + Write instead of TcpStream
-pub fn send_message<T: Serialize>(stream: TcpStream, data: &T) -> Result<()> {
+pub fn send_message<T: Serialize, S: Write + Read>(stream: S, data: &T) -> Result<()> {
     let mut ser_data = Vec::with_capacity(1024);
     ser_data.push(0u8);
 
