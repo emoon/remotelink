@@ -1,10 +1,14 @@
 use anyhow::Result;
 use bincode;
 use serde::ser::Serialize;
-use std::io::{Write, Read};
+use std::io::{Read, Write};
+use std::mem::transmute;
 
 pub const REMOTELINK_MAJOR_VERSION: u8 = 0;
 pub const REMOTELINK_MINOR_VERSION: u8 = 1;
+
+/// Used for read/write over the stream
+const CHUNK_SIZE: usize = 64 * 1024;
 
 #[repr(u8)]
 pub enum Messages {
@@ -18,21 +22,18 @@ pub enum Messages {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct FistbumpRequest {
-    pub msg_type: u8,
     pub version_major: u8,
     pub version_minor: u8,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct FistbumpReply {
-    msg_type: u8,
     version_major: u8,
     version_minor: u8,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct LaunchExecutableRequest {
-    msg_type: u8,
     msg_part: u8,
     file_server: bool,
     path: String,
@@ -41,28 +42,69 @@ pub struct LaunchExecutableRequest {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct LaunchExecutableReplay {
-    msg_type: u8,
     launch_status: i32,
     error_info: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct StopExecutableRequest {
-    msg_type: u8,
-}
+/// Send message over the stream
+pub fn send_message<T: Serialize, S: Write + Read>(
+    stream: &mut S,
+    data: &T,
+    msg_type: Messages,
+) -> Result<()> {
+    let mut header: [u8; 8] = [0; 8];
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct StopExecutableReply {
-    msg_type: u8,
-}
-
-pub fn send_message<T: Serialize, S: Write + Read>(stream: S, data: &T) -> Result<()> {
     let mut ser_data = Vec::with_capacity(1024);
-    ser_data.push(0u8);
+    bincode::serialize_into(&mut ser_data, data)?;
 
-    bincode::serialize_into(ser_data, data)?;
+    let len = ser_data.len() as u64;
+    // reserve upper space for type
+    assert!(len < 0xffff_ffff_ffff);
+    // store type in top byte
+    header[0] = msg_type as u8;
+    header[1] = ((len >> 48) & 0xff) as u8;
+    header[2] = ((len >> 40) & 0xff) as u8;
+    header[3] = ((len >> 32) & 0xff) as u8;
+    header[4] = ((len >> 24) & 0xff) as u8;
+    header[5] = ((len >> 16) & 0xff) as u8;
+    header[6] = ((len >> 8) & 0xff) as u8;
+    header[7] = (len & 0xff) as u8;
+
+    stream.write(&header)?;
+	stream.write(&ser_data)?;
 
     Ok(())
+}
+
+pub fn get_message<S: Write + Read>(stream: &mut S) -> Result<(Messages, Vec<u8>)> {
+    let mut header: [u8; 8] = [0; 8];
+
+    // read data to the header (type and size)
+    stream.read_exact(&mut header)?;
+
+    let msg_type = header[0];
+    let size = ((header[1] as u64) << 48)
+        | ((header[2] as u64) << 40)
+        | ((header[3] as u64) << 32)
+        | ((header[4] as u64) << 24)
+        | ((header[5] as u64) << 16)
+        | ((header[6] as u64) << 8)
+        | (header[7] as u64);
+
+	let msg: Messages = unsafe { transmute(msg_type) };
+
+    // if message is zero sized we have a basic message without any data to it
+    if size == 0 {
+        return Ok((msg, Vec::<u8>::new()));
+    }
+
+    // (large) sanity check
+    assert!(size < 0xffff_ffff_ffff);
+
+    let mut data = Vec::with_capacity(size as usize);
+	stream.read_exact(&mut data)?;
+
+    Ok((msg, data))
 }
 
 /*

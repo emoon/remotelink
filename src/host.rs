@@ -2,26 +2,26 @@
 //use std::io::{BufReader, Error, Read, Write};
 use anyhow::Result;
 use std::io::{Read, Write};
+use std::net::TcpStream;
 
 use crate::messages::*;
 use crate::options::Opt;
 
-fn fistbump<T: Write + Read>(stream: T) -> Result<()> {
+fn fistbump<T: Write + Read>(stream: &mut T) -> Result<()> {
     let fistbump_request = FistbumpRequest {
-        msg_type: Messages::FistbumpRequest as u8,
         version_major: REMOTELINK_MAJOR_VERSION,
         version_minor: REMOTELINK_MINOR_VERSION,
     };
 
-    send_message(stream, &fistbump_request)?;
+    send_message(stream, &fistbump_request, Messages::FistbumpRequest)?;
 
     Ok(())
 }
 
-pub fn host_loop(opts: &Opt, ip_address: &str) -> Result<()> {
+pub fn host_loop(_opts: &Opt, ip_address: &str) -> Result<()> {
     let mut stream = TcpStream::connect(ip_address)?;
 
-    fistbump(stream)?;
+    fistbump(&mut stream)?;
 
     Ok(())
 
