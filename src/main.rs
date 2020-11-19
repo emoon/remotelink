@@ -7,8 +7,8 @@ mod options;
 mod target;
 mod tests;
 
-use anyhow::Result;
 use crate::options::Opt;
+use anyhow::Result;
 use structopt::StructOpt;
 
 fn main() -> Result<()> {

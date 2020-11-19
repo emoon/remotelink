@@ -1,10 +1,11 @@
 //use std::fs::File;
 //use std::io::{BufReader, Error, Read, Write};
-use anyhow::Result;
+use anyhow::*;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 
 use crate::messages::*;
+use crate::messages;
 use crate::options::Opt;
 
 fn fistbump<T: Write + Read>(stream: &mut T) -> Result<()> {
@@ -13,13 +14,30 @@ fn fistbump<T: Write + Read>(stream: &mut T) -> Result<()> {
         version_minor: REMOTELINK_MINOR_VERSION,
     };
 
+    println!("host: sending message");
+
     send_message(stream, &fistbump_request, Messages::FistbumpRequest)?;
+
+    // expect reply message here directly
+
+    println!("host: reading message header");
+    let header = messages::get_header(stream)?;
+    println!("host: reading data");
+    let data = messages::get_data(stream, header)?;
+
+    if header.msg_type == Messages::FistbumpReply {
+        let _msg: FistbumpReply = messages::get_message(&data)?;
+        // TODO: Handle miss-matching version here
+    } else {
+        return Err(anyhow!("Incorrect message returned for FistbumpRequest {:?}", header.msg_type));
+    }
 
     Ok(())
 }
 
-pub fn host_loop(_opts: &Opt, ip_address: &str) -> Result<()> {
+pub fn host_loop(_opts: &Opt, _ip_address: &str) -> Result<()> {
     let mut stream = TcpStream::connect("127.0.0.1:8888")?;
+    stream.set_nonblocking(true)?;
 
     println!("connection made");
 

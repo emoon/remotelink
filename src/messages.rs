@@ -1,7 +1,7 @@
 use anyhow::Result;
 use bincode;
-use serde::ser::Serialize;
 use serde::de::Deserialize;
+use serde::ser::Serialize;
 use std::io::{Read, Write};
 use std::mem::transmute;
 
@@ -9,10 +9,10 @@ pub const REMOTELINK_MAJOR_VERSION: u8 = 0;
 pub const REMOTELINK_MINOR_VERSION: u8 = 1;
 
 /// Used for read/write over the stream
-const CHUNK_SIZE: usize = 64 * 1024;
+//const CHUNK_SIZE: usize = 64 * 1024;
 
 #[repr(u8)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 pub enum Messages {
     FistbumpRequest = 0,
     FistbumpReply = 1,
@@ -30,21 +30,21 @@ pub struct FistbumpRequest {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct FistbumpReply {
-    version_major: u8,
-    version_minor: u8,
+    pub version_major: u8,
+    pub version_minor: u8,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct LaunchExecutableRequest {
-    file_server: bool,
-    path: String,
-    data: Vec<u8>,
+pub struct LaunchExecutableRequest<'a> {
+    pub file_server: bool,
+    pub path: &'a str,
+    pub data: &'a [u8],
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct LaunchExecutableReplay {
-    launch_status: i32,
-    error_info: Option<String>,
+pub struct LaunchExecutableReplay<'a> {
+    pub launch_status: i32,
+    pub error_info: Option<&'a str>,
 }
 
 #[derive(Copy, Clone)]
@@ -77,14 +77,20 @@ pub fn send_message<T: Serialize, S: Write + Read>(
     header[6] = ((len >> 8) & 0xff) as u8;
     header[7] = (len & 0xff) as u8;
 
+    println!("message: write header (size {})", header.len());
+
     stream.write(&header)?;
-	stream.write(&ser_data)?;
+
+    println!("message: write ser    (size {})", ser_data.len());
+    stream.write(&ser_data)?;
 
     Ok(())
 }
 
 pub fn get_header<S: Write + Read>(stream: &mut S) -> Result<Header> {
     let mut header: [u8; 8] = [0; 8];
+
+    println!("messages: reading header");
 
     // read data to the header (type and size)
     stream.read_exact(&mut header)?;
@@ -98,12 +104,17 @@ pub fn get_header<S: Write + Read>(stream: &mut S) -> Result<Header> {
         | ((header[6] as u64) << 8)
         | (header[7] as u64);
 
-	let msg_type: Messages = unsafe { transmute(msg_type) };
+    let msg_type: Messages = unsafe { transmute(msg_type) };
 
-	Ok(Header { msg_type, size: size as usize })
+    println!("header type {:?} size {}", msg_type, size);
+
+    Ok(Header {
+        msg_type,
+        size: size as usize,
+    })
 }
 
-fn read_msg_data<S: Write + Read>(stream: &mut S, header: Header) -> Result<Vec<u8>> {
+pub fn get_data<S: Write + Read>(stream: &mut S, header: Header) -> Result<Vec<u8>> {
     // if message is zero sized we have a basic message without any data to it
     if header.size == 0 {
         return Ok(Vec::<u8>::new());
@@ -112,42 +123,46 @@ fn read_msg_data<S: Write + Read>(stream: &mut S, header: Header) -> Result<Vec<
     // (large) sanity check
     assert!(header.size < 0xffff_ffff_ffff);
 
-    let mut data = Vec::with_capacity(header.size);
-	stream.read_exact(&mut data)?;
+    let mut data = vec![0u8; header.size];
+
+    println!("messages: reading data size {}", data.len());
+
+    stream.read_exact(&mut data)?;
 
     Ok(data)
 }
 
-pub fn get_message<'a, T: Deserialize<'a>, S: Write + Read>(stream: &mut S, header: Header) -> Result<T> {
-    let data = read_msg_data(stream, header)?;
-    let message: T = bincode::deserialize(&data)?;
+pub fn get_message<'a, T: Deserialize<'a>>(
+    data: &'a [u8],
+) -> Result<T> {
+    let message: T = bincode::deserialize(data)?;
     Ok(message)
 }
 
 /*
 #[derive(Serialize, Deserialize, Debug)]
 pub struct OpenHandleRequest {
-    msg_type: u8,
-    path: String,
+msg_type: u8,
+path: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct OpenHandleReply {
-    msg_type: u8,
-    handle: Option<u32>,
+msg_type: u8,
+handle: Option<u32>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ReadRequest {
-    msg_type: u8,
-    handle: u32,
-    size: u64,
+msg_type: u8,
+handle: u32,
+size: u64,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ReadReply {
-    msg_type: u8,
-    data: Vec<u8>,
+msg_type: u8,
+data: Vec<u8>,
 }
 
 */

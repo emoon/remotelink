@@ -1,4 +1,3 @@
-
 #[cfg(test)]
 mod remote_link {
     #[test]

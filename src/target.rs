@@ -1,29 +1,75 @@
 use crate::options::*;
-use anyhow::Result;
-use std::io::{BufReader, Read, Write};
+use crate::messages;
+use crate::messages::{Messages, FistbumpRequest, FistbumpReply };
+use anyhow::*;
 use std::net::{TcpListener, TcpStream};
 use std::thread;
-use crate::messages::*;
 
 struct Contex {
     stream: TcpStream,
 }
 
+/*
+ *
+ *
+
+        match stream.read(&mut buf[..]) {
+            Ok(n) if n > 0 => {
+                let msg = std::str::from_utf8(&buf[..n]).unwrap();
+                println!("{}: {}", addr, msg.trim());
+            }
+            Ok(_) => {
+                // Connection closed.
+                return stream.shutdown(net::Shutdown::Both);
+            }
+            Err(err) if err.kind() == io::ErrorKind::WouldBlock => {
+                // Nothing left to read.
+                break;
+            }
+            Err(err) => {
+                panic!(err);
+            }
+        }
+    }
+}
+*/
 fn handle_client(stream: &mut TcpStream) -> Result<()> {
     println!("Incoming connection from: {}", stream.peer_addr()?);
+
+    stream.set_nonblocking(true)?;
 
     //let mut filebuffer = Vec::new();
 
     loop {
-        let header = get_header(stream)?;
+        let header = messages::get_header(stream)?;
+        let data = messages::get_data(stream, header)?;
 
         match header.msg_type {
             Messages::FistbumpRequest => {
-                let msg: FistbumpRequest = get_message(stream, header)?;
+                let msg: FistbumpRequest = messages::get_message(&data)?;
 
+                println!("target: got FistbumpRequest");
 
+                if msg.version_major != messages::REMOTELINK_MAJOR_VERSION {
+                    return Err(anyhow!("Major version miss-match (target {} host {})",
+                        messages::REMOTELINK_MAJOR_VERSION, msg.version_major));
+                }
 
-            },
+                if msg.version_minor != messages::REMOTELINK_MINOR_VERSION {
+                    println!("Minor version miss-matching, but continuing");
+                }
+
+                let fistbump_reply = FistbumpReply {
+                    version_major: messages::REMOTELINK_MAJOR_VERSION,
+                    version_minor: messages::REMOTELINK_MINOR_VERSION,
+                };
+
+                println!("target: sending data back");
+
+                messages::send_message(stream, &fistbump_reply, Messages::FistbumpReply)?;
+            }
+
+            _ => (),
         }
 
         /*
@@ -70,9 +116,9 @@ pub fn target_loop(_opts: &Opt) {
     for stream in listener.incoming() {
         match stream {
             Err(e) => eprintln!("failed: {}", e),
-            Ok(stream) => {
+            Ok(mut stream) => {
                 thread::spawn(move || {
-                    handle_client(stream).unwrap_or_else(|error| eprintln!("{:?}", error));
+                    handle_client(&mut stream).unwrap_or_else(|error| eprintln!("{:?}", error));
                 });
             }
         }
