@@ -4,13 +4,13 @@ pub use structopt::StructOpt;
 #[structopt(name = "Remotelink")]
 pub struct Opt {
     #[structopt(short, long)]
-    debug: bool,
+    pub debug: bool,
     #[structopt(short, long)]
-    host: bool,
+    pub host: bool,
     #[structopt(short, long, default_value = "8888")]
-    port: u16,
+    pub port: u16,
     #[structopt(short, long)]
-    target: Option<String>,
+    pub target: Option<String>,
     #[structopt(short, long)]
-    filename: Option<String>,
+    pub filename: Option<String>,
 }

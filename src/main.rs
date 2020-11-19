@@ -7,19 +7,20 @@ mod options;
 mod target;
 mod tests;
 
+use anyhow::Result;
 use crate::options::Opt;
 use structopt::StructOpt;
 
-fn main() {
+fn main() -> Result<()> {
     let opt = Opt::from_args();
 
-    /*
-    if opt.server {
-        server_loop(&opt);
-    } else if opt.target.is_some() {
-        client_loop(&opt, opt.target.as_ref().unwrap());
+    if opt.host {
+        println!("Starting target");
+        target::target_loop(&opt);
     } else {
-        println!("Must pass --server or --client");
+        println!("Starting host");
+        host::host_loop(&opt, opt.target.as_ref().unwrap())?;
     }
-    */
+
+    Ok(())
 }

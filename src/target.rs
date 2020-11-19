@@ -3,34 +3,28 @@ use anyhow::Result;
 use std::io::{BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::thread;
+use crate::messages::*;
 
 struct Contex {
     stream: TcpStream,
 }
 
-fn init_packet(dest: &mut [u8], src: &[u8], command: u8) -> usize {
-    dest[0] = command;
-
-    for (place, b) in dest[1..].iter_mut().zip(src) {
-        *place = *b;
-    }
-
-    src.len() + 1
-}
-
-fn handle_client(stream: TcpStream) -> Result<()> {
+fn handle_client(stream: &mut TcpStream) -> Result<()> {
     println!("Incoming connection from: {}", stream.peer_addr()?);
-    let mut data: [u8; 1024] = [0; 1024];
-    let mut stream = BufReader::new(stream);
+
     //let mut filebuffer = Vec::new();
 
     loop {
-        let bytes_read = { stream.read(&mut data)? };
-        if bytes_read == 0 {
-            return Ok(());
-        }
+        let header = get_header(stream)?;
 
-        let id = data[0];
+        match header.msg_type {
+            Messages::FistbumpRequest => {
+                let msg: FistbumpRequest = get_message(stream, header)?;
+
+
+
+            },
+        }
 
         /*
         match id {
@@ -70,8 +64,9 @@ fn handle_client(stream: TcpStream) -> Result<()> {
     }
 }
 
-fn target_loop(_opts: &Opt) {
+pub fn target_loop(_opts: &Opt) {
     let listener = TcpListener::bind("0.0.0.0:8888").expect("Could not bind");
+    println!("Wating incoming host");
     for stream in listener.incoming() {
         match stream {
             Err(e) => eprintln!("failed: {}", e),

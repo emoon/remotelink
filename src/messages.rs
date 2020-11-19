@@ -1,6 +1,7 @@
 use anyhow::Result;
 use bincode;
 use serde::ser::Serialize;
+use serde::de::Deserialize;
 use std::io::{Read, Write};
 use std::mem::transmute;
 
@@ -11,6 +12,7 @@ pub const REMOTELINK_MINOR_VERSION: u8 = 1;
 const CHUNK_SIZE: usize = 64 * 1024;
 
 #[repr(u8)]
+#[derive(Copy, Clone)]
 pub enum Messages {
     FistbumpRequest = 0,
     FistbumpReply = 1,
@@ -34,7 +36,6 @@ pub struct FistbumpReply {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct LaunchExecutableRequest {
-    msg_part: u8,
     file_server: bool,
     path: String,
     data: Vec<u8>,
@@ -44,6 +45,12 @@ pub struct LaunchExecutableRequest {
 pub struct LaunchExecutableReplay {
     launch_status: i32,
     error_info: Option<String>,
+}
+
+#[derive(Copy, Clone)]
+pub struct Header {
+    pub msg_type: Messages,
+    pub size: usize,
 }
 
 /// Send message over the stream
@@ -76,7 +83,7 @@ pub fn send_message<T: Serialize, S: Write + Read>(
     Ok(())
 }
 
-pub fn get_message<S: Write + Read>(stream: &mut S) -> Result<(Messages, Vec<u8>)> {
+pub fn get_header<S: Write + Read>(stream: &mut S) -> Result<Header> {
     let mut header: [u8; 8] = [0; 8];
 
     // read data to the header (type and size)
@@ -91,20 +98,30 @@ pub fn get_message<S: Write + Read>(stream: &mut S) -> Result<(Messages, Vec<u8>
         | ((header[6] as u64) << 8)
         | (header[7] as u64);
 
-	let msg: Messages = unsafe { transmute(msg_type) };
+	let msg_type: Messages = unsafe { transmute(msg_type) };
 
+	Ok(Header { msg_type, size: size as usize })
+}
+
+fn read_msg_data<S: Write + Read>(stream: &mut S, header: Header) -> Result<Vec<u8>> {
     // if message is zero sized we have a basic message without any data to it
-    if size == 0 {
-        return Ok((msg, Vec::<u8>::new()));
+    if header.size == 0 {
+        return Ok(Vec::<u8>::new());
     }
 
     // (large) sanity check
-    assert!(size < 0xffff_ffff_ffff);
+    assert!(header.size < 0xffff_ffff_ffff);
 
-    let mut data = Vec::with_capacity(size as usize);
+    let mut data = Vec::with_capacity(header.size);
 	stream.read_exact(&mut data)?;
 
-    Ok((msg, data))
+    Ok(data)
+}
+
+pub fn get_message<'a, T: Deserialize<'a>, S: Write + Read>(stream: &mut S, header: Header) -> Result<T> {
+    let data = read_msg_data(stream, header)?;
+    let message: T = bincode::deserialize(&data)?;
+    Ok(message)
 }
 
 /*

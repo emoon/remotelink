@@ -19,7 +19,9 @@ fn fistbump<T: Write + Read>(stream: &mut T) -> Result<()> {
 }
 
 pub fn host_loop(_opts: &Opt, ip_address: &str) -> Result<()> {
-    let mut stream = TcpStream::connect(ip_address)?;
+    let mut stream = TcpStream::connect("127.0.0.1:8888")?;
+
+    println!("connection made");
 
     fistbump(&mut stream)?;
 
