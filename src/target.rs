@@ -4,73 +4,109 @@ use crate::messages::{Messages, FistbumpRequest, FistbumpReply };
 use anyhow::*;
 use std::net::{TcpListener, TcpStream};
 use std::thread;
+use std::io::{Read, Write};
+use crate::message_stream::MessageStream;
 
 struct Contex {
     stream: TcpStream,
 }
 
-/*
- *
- *
 
-        match stream.read(&mut buf[..]) {
-            Ok(n) if n > 0 => {
-                let msg = std::str::from_utf8(&buf[..n]).unwrap();
-                println!("{}: {}", addr, msg.trim());
+/// Handles incoming messages and sends back reply (if needed)
+fn handle_incoming_msg<S: Write + Read>(
+    msg_stream: &mut MessageStream,
+    stream: &mut S,
+    message: Messages,
+) -> Result<()> {
+    match message {
+        Messages::FistbumpRequest => {
+            let msg: FistbumpRequest = bincode::deserialize(&msg_stream.data)?;
+
+            println!("target: got FistbumpRequest");
+
+            if msg.version_major != messages::REMOTELINK_MAJOR_VERSION {
+                return Err(anyhow!("Major version miss-match (target {} host {})",
+                    messages::REMOTELINK_MAJOR_VERSION, msg.version_major));
             }
-            Ok(_) => {
-                // Connection closed.
-                return stream.shutdown(net::Shutdown::Both);
+
+            if msg.version_minor != messages::REMOTELINK_MINOR_VERSION {
+                println!("Minor version miss-matching, but continuing");
             }
-            Err(err) if err.kind() == io::ErrorKind::WouldBlock => {
-                // Nothing left to read.
-                break;
-            }
-            Err(err) => {
-                panic!(err);
-            }
+
+            let fistbump_reply = FistbumpReply {
+                version_major: messages::REMOTELINK_MAJOR_VERSION,
+                version_minor: messages::REMOTELINK_MINOR_VERSION,
+            };
+
+            msg_stream.begin_write_message(stream, &fistbump_reply, Messages::FistbumpReply)?;
+
+            println!("target: sending data back");
         }
+
+        Messages::LaunchExecutableRequest => {
+            dbg!(msg_stream.data.len());
+            let file: bincode::Result<messages::LaunchExecutableRequest> = bincode::deserialize(&msg_stream.data);
+
+            match file {
+                Ok(f) => {
+                    println!("Want to launch {} size {}", f.path, f.data.len());
+                }
+
+                Err(e) => {
+                    dbg!(&e);
+                    panic!(e);
+                },
+            }
+        },
+
+        _ => {
+            // if we didn't handle the message switch over to waiting for new data
+            dbg!(message);
+        },
     }
+
+
+    Ok(())
 }
-*/
+
+
 fn handle_client(stream: &mut TcpStream) -> Result<()> {
     println!("Incoming connection from: {}", stream.peer_addr()?);
 
     stream.set_nonblocking(true)?;
 
+    let mut msg_stream = MessageStream::new();
+
+    msg_stream.begin_read(stream, false)?;
+
     //let mut filebuffer = Vec::new();
 
     loop {
-        let header = messages::get_header(stream)?;
-        let data = messages::get_data(stream, header)?;
+        let msg = msg_stream.update(stream)?;
 
-        match header.msg_type {
-            Messages::FistbumpRequest => {
-                let msg: FistbumpRequest = messages::get_message(&data)?;
-
-                println!("target: got FistbumpRequest");
-
-                if msg.version_major != messages::REMOTELINK_MAJOR_VERSION {
-                    return Err(anyhow!("Major version miss-match (target {} host {})",
-                        messages::REMOTELINK_MAJOR_VERSION, msg.version_major));
-                }
-
-                if msg.version_minor != messages::REMOTELINK_MINOR_VERSION {
-                    println!("Minor version miss-matching, but continuing");
-                }
-
-                let fistbump_reply = FistbumpReply {
-                    version_major: messages::REMOTELINK_MAJOR_VERSION,
-                    version_minor: messages::REMOTELINK_MINOR_VERSION,
-                };
-
-                println!("target: sending data back");
-
-                messages::send_message(stream, &fistbump_reply, Messages::FistbumpReply)?;
-            }
-
+        match msg {
+            Some(msg) => handle_incoming_msg(&mut msg_stream, stream, msg)?,
             _ => (),
         }
+
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+}
+
+pub fn target_loop(_opts: &Opt) {
+    let listener = TcpListener::bind("0.0.0.0:8888").expect("Could not bind");
+    println!("Wating incoming host");
+    for stream in listener.incoming() {
+        match stream {
+            Err(e) => eprintln!("failed: {}", e),
+            Ok(mut stream) => {
+                thread::spawn(move || {
+                    handle_client(&mut stream).unwrap_or_else(|error| eprintln!("{:?}", error));
+                });
+            }
+        }
+    }
+}
 
         /*
         match id {
@@ -107,20 +143,4 @@ fn handle_client(stream: &mut TcpStream) -> Result<()> {
             _ => (),
         }
         */
-    }
-}
 
-pub fn target_loop(_opts: &Opt) {
-    let listener = TcpListener::bind("0.0.0.0:8888").expect("Could not bind");
-    println!("Wating incoming host");
-    for stream in listener.incoming() {
-        match stream {
-            Err(e) => eprintln!("failed: {}", e),
-            Ok(mut stream) => {
-                thread::spawn(move || {
-                    handle_client(&mut stream).unwrap_or_else(|error| eprintln!("{:?}", error));
-                });
-            }
-        }
-    }
-}

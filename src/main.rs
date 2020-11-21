@@ -6,6 +6,7 @@ mod messages;
 mod options;
 mod target;
 mod tests;
+mod message_stream;
 
 use crate::options::Opt;
 use anyhow::Result;

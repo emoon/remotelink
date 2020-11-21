@@ -20,6 +20,7 @@ pub enum Messages {
     LaunchExecutableReply = 3,
     StopExecutableRequest = 4,
     StopExecutableReply = 5,
+    NoMessage = 6,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
