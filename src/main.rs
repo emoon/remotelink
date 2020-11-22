@@ -7,6 +7,7 @@ mod options;
 mod target;
 mod tests;
 mod message_stream;
+mod log;
 
 use crate::options::Opt;
 use anyhow::Result;
@@ -14,6 +15,8 @@ use structopt::StructOpt;
 
 fn main() -> Result<()> {
     let opt = Opt::from_args();
+
+    log::set_log_level(log::LOG_TRACE);
 
     if opt.host {
         println!("Starting target");

@@ -5,11 +5,19 @@ use anyhow::*;
 use std::net::{TcpListener, TcpStream};
 use std::thread;
 use std::io::{Read, Write};
-use crate::message_stream::MessageStream;
+use crate::message_stream::{MessageStream, TransitionToRead};
+use std::process::Child;
 
-struct Contex {
-    stream: TcpStream,
+struct Context {
+    /// Used for tracking running executable.
+    proc: Option<Child>,
 }
+
+impl Context
+
+fn handle_fistbump_request(<S: Write + Read>(
+    msg_stream: &mut MessageStream,
+    stream: &mut S,
 
 
 /// Handles incoming messages and sends back reply (if needed)
@@ -38,7 +46,7 @@ fn handle_incoming_msg<S: Write + Read>(
                 version_minor: messages::REMOTELINK_MINOR_VERSION,
             };
 
-            msg_stream.begin_write_message(stream, &fistbump_reply, Messages::FistbumpReply)?;
+            msg_stream.begin_write_message(stream, &fistbump_reply, Messages::FistbumpReply, TransitionToRead::Yes)?;
 
             println!("target: sending data back");
         }
@@ -89,7 +97,7 @@ fn handle_client(stream: &mut TcpStream) -> Result<()> {
             _ => (),
         }
 
-        std::thread::sleep(std::time::Duration::from_millis(500));
+        std::thread::sleep(std::time::Duration::from_millis(1));
     }
 }
 

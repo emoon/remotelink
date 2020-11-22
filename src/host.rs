@@ -5,7 +5,7 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::fs::File;
 
-use crate::message_stream::MessageStream;
+use crate::message_stream::{MessageStream, TransitionToRead};
 use crate::messages::*;
 use crate::options::Opt;
 
@@ -20,7 +20,7 @@ fn fistbump<T: Write + Read>(stream: &mut T) -> Result<()> {
     println!("host: sending message");
 
     // as socket is in blocking mode at this point we expect this to return with the correct data directly
-    if !msg_stream.begin_write_message(stream, &fistbump_request, Messages::FistbumpRequest)? {
+    if !msg_stream.begin_write_message(stream, &fistbump_request, Messages::FistbumpRequest, TransitionToRead::No)? {
         return Err(anyhow!(
             "Message write wasn't finished, should have completed directly"
         ));
@@ -76,7 +76,7 @@ fn send_file<S: Write + Read>(
         data: &buffer,
     };
 
-    msg_stream.begin_write_message(stream, &file_request, Messages::LaunchExecutableRequest)?;
+    msg_stream.begin_write_message(stream, &file_request, Messages::LaunchExecutableRequest, TransitionToRead::Yes)?;
 
     dbg!();
 
@@ -102,13 +102,12 @@ pub fn host_loop(opts: &Opt, _ip_address: &str) -> Result<()> {
     }
 
     loop {
-        dbg!();
         if let Some(msg) = msg_stream.update(&mut stream)? {
             handle_incoming_msg(&mut msg_stream, &mut stream, msg)?;
         }
 
         // don't hammer the CPU
-        std::thread::sleep(std::time::Duration::from_millis(500));
+        std::thread::sleep(std::time::Duration::from_millis(1));
     }
 }
 
