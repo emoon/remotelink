@@ -2,12 +2,12 @@
 extern crate serde_derive;
 
 mod host;
+mod log;
+mod message_stream;
 mod messages;
 mod options;
 mod target;
 mod tests;
-mod message_stream;
-mod log;
 
 use crate::options::Opt;
 use anyhow::Result;

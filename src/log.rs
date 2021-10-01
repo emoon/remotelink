@@ -7,6 +7,7 @@ pub const LOG_WARN: i32 = 3;
 pub const LOG_ERROR: i32 = 4;
 
 static mut LOG_LEVEL: i32 = LOG_WARN;
+#[rustfmt::skip]
 static LOG_NAMES: &[&str] = &[
     "TRACE",
     "DEBUG",
@@ -16,7 +17,9 @@ static LOG_NAMES: &[&str] = &[
 ];
 
 pub fn set_log_level(level: i32) {
-    unsafe { LOG_LEVEL = level; }
+    unsafe {
+        LOG_LEVEL = level;
+    }
 }
 
 pub fn do_log(log_level: i32, format: fmt::Arguments) {
@@ -35,4 +38,3 @@ macro_rules! trace {
         $crate::log::do_log($crate::log::LOG_TRACE, format_args!($($arg)*))
     });
 }
-

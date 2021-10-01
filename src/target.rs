@@ -1,24 +1,25 @@
-use crate::options::*;
-use crate::messages;
-use crate::messages::{Messages, FistbumpRequest, FistbumpReply };
-use anyhow::*;
-use std::net::{TcpListener, TcpStream};
-use std::thread;
-use std::io::{Read, Write};
 use crate::message_stream::{MessageStream, TransitionToRead};
+use crate::messages;
+use crate::messages::{FistbumpReply, FistbumpRequest, Messages};
+use crate::options::*;
+use anyhow::*;
+use std::io::{Read, Write};
+use std::net::{TcpListener, TcpStream};
 use std::process::Child;
+use std::thread;
 
 struct Context {
     /// Used for tracking running executable.
     proc: Option<Child>,
 }
 
+/*
 impl Context
 
 fn handle_fistbump_request(<S: Write + Read>(
     msg_stream: &mut MessageStream,
     stream: &mut S,
-
+*/
 
 /// Handles incoming messages and sends back reply (if needed)
 fn handle_incoming_msg<S: Write + Read>(
@@ -33,8 +34,11 @@ fn handle_incoming_msg<S: Write + Read>(
             println!("target: got FistbumpRequest");
 
             if msg.version_major != messages::REMOTELINK_MAJOR_VERSION {
-                return Err(anyhow!("Major version miss-match (target {} host {})",
-                    messages::REMOTELINK_MAJOR_VERSION, msg.version_major));
+                return Err(anyhow!(
+                    "Major version miss-match (target {} host {})",
+                    messages::REMOTELINK_MAJOR_VERSION,
+                    msg.version_major
+                ));
             }
 
             if msg.version_minor != messages::REMOTELINK_MINOR_VERSION {
@@ -46,14 +50,20 @@ fn handle_incoming_msg<S: Write + Read>(
                 version_minor: messages::REMOTELINK_MINOR_VERSION,
             };
 
-            msg_stream.begin_write_message(stream, &fistbump_reply, Messages::FistbumpReply, TransitionToRead::Yes)?;
+            msg_stream.begin_write_message(
+                stream,
+                &fistbump_reply,
+                Messages::FistbumpReply,
+                TransitionToRead::Yes,
+            )?;
 
             println!("target: sending data back");
         }
 
         Messages::LaunchExecutableRequest => {
             dbg!(msg_stream.data.len());
-            let file: bincode::Result<messages::LaunchExecutableRequest> = bincode::deserialize(&msg_stream.data);
+            let file: bincode::Result<messages::LaunchExecutableRequest> =
+                bincode::deserialize(&msg_stream.data);
 
             match file {
                 Ok(f) => {
@@ -63,20 +73,18 @@ fn handle_incoming_msg<S: Write + Read>(
                 Err(e) => {
                     dbg!(&e);
                     panic!(e);
-                },
+                }
             }
-        },
+        }
 
         _ => {
             // if we didn't handle the message switch over to waiting for new data
             dbg!(message);
-        },
+        }
     }
-
 
     Ok(())
 }
-
 
 fn handle_client(stream: &mut TcpStream) -> Result<()> {
     println!("Incoming connection from: {}", stream.peer_addr()?);
@@ -116,39 +124,38 @@ pub fn target_loop(_opts: &Opt) {
     }
 }
 
-        /*
-        match id {
-            START_FILE => {
-                let filename = std::str::from_utf8(&data[1..bytes_read]).unwrap();
-                println!("Client is about to send {} (len {})", filename, bytes_read);
-            }
+/*
+match id {
+    START_FILE => {
+        let filename = std::str::from_utf8(&data[1..bytes_read]).unwrap();
+        println!("Client is about to send {} (len {})", filename, bytes_read);
+    }
 
-            FILE_CHUNK => {
-                println!("Got file chunk size {}", bytes_read);
-                copy_data(&mut filebuffer, &data[1..bytes_read]);
-            }
+    FILE_CHUNK => {
+        println!("Got file chunk size {}", bytes_read);
+        copy_data(&mut filebuffer, &data[1..bytes_read]);
+    }
 
-            END_FILE => {
-                println!("Got file end chunk size {}", bytes_read);
-                copy_data(&mut filebuffer, &data[1..bytes_read]);
+    END_FILE => {
+        println!("Got file end chunk size {}", bytes_read);
+        copy_data(&mut filebuffer, &data[1..bytes_read]);
 
-                {
-                    let mut file = File::create("test")?;
-                    file.write_all(&filebuffer)?;
-                }
-
-                // make exe executable
-                std::fs::set_permissions("test", std::fs::Permissions::from_mode(0o700)).unwrap();
-
-                let output = Command::new("./test")
-                    .output()
-                    .expect("failed to execute process");
-
-                println!("status: {}", output.status);
-                std::io::stdout().write_all(&output.stdout).unwrap();
-            }
-
-            _ => (),
+        {
+            let mut file = File::create("test")?;
+            file.write_all(&filebuffer)?;
         }
-        */
 
+        // make exe executable
+        std::fs::set_permissions("test", std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        let output = Command::new("./test")
+            .output()
+            .expect("failed to execute process");
+
+        println!("status: {}", output.status);
+        std::io::stdout().write_all(&output.stdout).unwrap();
+    }
+
+    _ => (),
+}
+*/

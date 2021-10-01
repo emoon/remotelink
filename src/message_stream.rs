@@ -1,11 +1,10 @@
-
-use serde::ser::Serialize;
-use std::io::{Write, Read};
-use anyhow::*;
 use crate::messages::Messages;
+use crate::trace;
+use anyhow::*;
+use serde::ser::Serialize;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::Hasher;
-use crate::trace;
+use std::io::{Read, Write};
 
 /// These are all the states that is needed to write to the output
 /// This supports writing it non-blocking fashion and can pickup where it left of.
@@ -40,7 +39,7 @@ pub struct MessageStream {
     data_offset: usize,
     /// header to read/write from
     header: [u8; 8],
-    /// Dat to read/write from
+    /// Data to read/write from
     pub data: Vec<u8>,
 }
 
@@ -60,7 +59,9 @@ impl MessageStream {
     /// Update the state machine. Will return a Some(Message) when a read request has finished.
     /// For writes no state will be given back
     pub fn update<S: Write + Read>(&mut self, stream: &mut S) -> Result<Option<Messages>> {
-        trace!("update state {:?}", self.state);
+        if self.state != State::Complete {
+            trace!("update state {:?}", self.state);
+        }
 
         match self.state {
             State::WriteHeader => {
@@ -73,12 +74,12 @@ impl MessageStream {
                 }
 
                 Ok(None)
-            },
+            }
 
             State::WriteData => {
                 self.write_data(stream)?;
                 Ok(None)
-            },
+            }
 
             State::ReadHeader => {
                 self.read_header(stream)?;
@@ -89,21 +90,23 @@ impl MessageStream {
                 } else {
                     Ok(None)
                 }
-            },
+            }
 
             State::ReadData => {
                 dbg!();
                 self.read_data(stream)
             }
 
-            State::Complete => {
-                Ok(None)
-            },
+            State::Complete => Ok(None),
         }
     }
 
     /// Will return false if read can't be started (write/read in progress)
-    pub fn begin_read<S: Write + Read>(&mut self, stream: &mut S, do_update: bool) -> Result<Option<Messages>> {
+    pub fn begin_read<S: Write + Read>(
+        &mut self,
+        stream: &mut S,
+        do_update: bool,
+    ) -> Result<Option<Messages>> {
         if self.state != State::Complete && self.state != State::ReadHeader {
             trace!("begin_read: Not started, not correct state");
             Ok(None)
@@ -126,8 +129,8 @@ impl MessageStream {
         stream: &mut S,
         data: &T,
         msg_type: Messages,
-        trans_to_read: TransitionToRead) -> Result<bool> {
-
+        trans_to_read: TransitionToRead,
+    ) -> Result<bool> {
         // Make sure we can make progress
         if self.state != State::Complete {
             return Ok(false);
@@ -152,7 +155,11 @@ impl MessageStream {
         self.state = State::WriteHeader;
         self.header_offset = 0;
 
-        trace!("begin_write_message: {:?} len {}", msg_type, self.data.len());
+        trace!(
+            "begin_write_message: {:?} len {}",
+            msg_type,
+            self.data.len()
+        );
 
         // Do a update directly here to reduce latency as short messages will likely finish directly
         self.update(stream)?;
@@ -196,12 +203,19 @@ impl MessageStream {
     /// Write header to the stream and return the total amount of data that has been written
     fn write_header<S: Write + Read>(&mut self, stream: &mut S) -> Result<usize> {
         self.header_offset += Self::write(stream, &self.header[self.header_offset..])?;
-        trace!("write_header: written total of {} bytes", self.header_offset);
+        trace!(
+            "write_header: written total of {} bytes",
+            self.header_offset
+        );
 
         if self.header_offset == 8 {
             let mut hasher = DefaultHasher::new();
             hasher.write(&self.data);
-            trace!("write_data hash {:x} len {}", hasher.finish(), self.data.len());
+            trace!(
+                "write_data hash {:x} len {}",
+                hasher.finish(),
+                self.data.len()
+            );
 
             self.data_offset = 0;
             self.state = State::WriteData;
@@ -209,7 +223,6 @@ impl MessageStream {
 
         Ok(self.header_offset)
     }
-
 
     /// Write data to the stream and return the total amount of data that has been written
     fn write_data<S: Write + Read>(&mut self, stream: &mut S) -> Result<usize> {
@@ -264,7 +277,11 @@ impl MessageStream {
         if self.data_offset == self.data.len() {
             let mut hasher = DefaultHasher::new();
             hasher.write(&self.data);
-            trace!("read_data hash {:x} len {}", hasher.finish(), self.data.len());
+            trace!(
+                "read_data hash {:x} len {}",
+                hasher.finish(),
+                self.data.len()
+            );
             self.state = State::Complete;
             Ok(Some(self.message))
         } else {
@@ -272,4 +289,3 @@ impl MessageStream {
         }
     }
 }
-
