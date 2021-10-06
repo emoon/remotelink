@@ -3,87 +3,149 @@ use crate::messages;
 use crate::messages::{FistbumpReply, FistbumpRequest, Messages};
 use crate::options::*;
 use anyhow::*;
+use std::fs::File;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::process::Child;
+use std::os::unix::fs::PermissionsExt;
+use std::process::{Child, Command, Stdio};
+use std::sync::{Arc, Mutex};
 use std::thread;
 
+type IoOut = Arc<Mutex<Vec<u8>>>;
+
+#[derive(Default)]
 struct Context {
+    /// Used for tracking running executable.
+    stdout: Option<IoOut>,
+    /// Used for tracking running executable.
+    stderr: Option<IoOut>,
     /// Used for tracking running executable.
     proc: Option<Child>,
 }
 
-/*
-impl Context
+impl Context {
+    /// Handles incoming messages and sends back reply (if needed)
+    pub fn handle_incoming_msg<S: Write + Read>(
+        &mut self,
+        msg_stream: &mut MessageStream,
+        stream: &mut S,
+        message: Messages,
+    ) -> Result<()> {
+        match message {
+            Messages::FistbumpRequest => {
+                let msg: FistbumpRequest = bincode::deserialize(&msg_stream.data)?;
 
-fn handle_fistbump_request(<S: Write + Read>(
-    msg_stream: &mut MessageStream,
-    stream: &mut S,
-*/
+                println!("target: got FistbumpRequest");
 
-/// Handles incoming messages and sends back reply (if needed)
-fn handle_incoming_msg<S: Write + Read>(
-    msg_stream: &mut MessageStream,
-    stream: &mut S,
-    message: Messages,
-) -> Result<()> {
-    match message {
-        Messages::FistbumpRequest => {
-            let msg: FistbumpRequest = bincode::deserialize(&msg_stream.data)?;
-
-            println!("target: got FistbumpRequest");
-
-            if msg.version_major != messages::REMOTELINK_MAJOR_VERSION {
-                return Err(anyhow!(
-                    "Major version miss-match (target {} host {})",
-                    messages::REMOTELINK_MAJOR_VERSION,
-                    msg.version_major
-                ));
-            }
-
-            if msg.version_minor != messages::REMOTELINK_MINOR_VERSION {
-                println!("Minor version miss-matching, but continuing");
-            }
-
-            let fistbump_reply = FistbumpReply {
-                version_major: messages::REMOTELINK_MAJOR_VERSION,
-                version_minor: messages::REMOTELINK_MINOR_VERSION,
-            };
-
-            msg_stream.begin_write_message(
-                stream,
-                &fistbump_reply,
-                Messages::FistbumpReply,
-                TransitionToRead::Yes,
-            )?;
-
-            println!("target: sending data back");
-        }
-
-        Messages::LaunchExecutableRequest => {
-            dbg!(msg_stream.data.len());
-            let file: bincode::Result<messages::LaunchExecutableRequest> =
-                bincode::deserialize(&msg_stream.data);
-
-            match file {
-                Ok(f) => {
-                    println!("Want to launch {} size {}", f.path, f.data.len());
+                if msg.version_major != messages::REMOTELINK_MAJOR_VERSION {
+                    return Err(anyhow!(
+                        "Major version miss-match (target {} host {})",
+                        messages::REMOTELINK_MAJOR_VERSION,
+                        msg.version_major
+                    ));
                 }
 
-                Err(e) => {
-                    dbg!(&e);
-                    panic!(e);
+                if msg.version_minor != messages::REMOTELINK_MINOR_VERSION {
+                    println!("Minor version miss-matching, but continuing");
                 }
+
+                let fistbump_reply = FistbumpReply {
+                    version_major: messages::REMOTELINK_MAJOR_VERSION,
+                    version_minor: messages::REMOTELINK_MINOR_VERSION,
+                };
+
+                msg_stream.begin_write_message(
+                    stream,
+                    &fistbump_reply,
+                    Messages::FistbumpReply,
+                    TransitionToRead::Yes,
+                )?;
+
+                println!("target: sending data back");
+            }
+
+            Messages::LaunchExecutableRequest => {
+                dbg!(msg_stream.data.len());
+                let file: bincode::Result<messages::LaunchExecutableRequest> =
+                    bincode::deserialize(&msg_stream.data);
+
+                match file {
+                    Ok(f) => {
+                        self.start_executable(&f);
+                    }
+
+                    Err(e) => {
+                        dbg!(&e);
+                        panic!("{}", e);
+                    }
+                }
+            }
+
+            _ => {
+                // if we didn't handle the message switch over to waiting for new data
+                dbg!(message);
             }
         }
 
-        _ => {
-            // if we didn't handle the message switch over to waiting for new data
-            dbg!(message);
-        }
+        Ok(())
     }
 
-    Ok(())
+    /// Pipe streams are blocking, we need separate threads to monitor them without blocking the primary thread.
+    fn child_stream_to_vec<R>(mut stream: R) -> IoOut
+    where
+        R: Read + Send + 'static,
+    {
+        let out = Arc::new(Mutex::new(Vec::new()));
+        let vec = out.clone();
+        thread::Builder::new()
+            .name("child_stream_to_vec".into())
+            .spawn(move || loop {
+                let mut buf = [0];
+                match stream.read(&mut buf) {
+                    Err(err) => {
+                        println!("{}] Error reading from stream: {}", line!(), err);
+                        break;
+                    }
+                    Ok(got) => {
+                        if got == 0 {
+                            break;
+                        } else if got == 1 {
+                            vec.lock().expect("!lock").push(buf[0])
+                        } else {
+                            println!("{}] Unexpected number of bytes: {}", line!(), got);
+                            break;
+                        }
+                    }
+                }
+            })
+            .expect("!thread");
+        out
+    }
+
+    fn start_executable(&mut self, f: &messages::LaunchExecutableRequest) {
+        println!("Want to launch {} size {}", f.path, f.data.len());
+
+        {
+            let mut file = File::create("test").unwrap();
+            file.write_all(&f.data).unwrap();
+        }
+
+        // make exe executable
+        std::fs::set_permissions("test", std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        let mut p = Command::new("./test")
+                .stderr(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()
+                .expect("failed to execute child");
+
+        self.stdout = Some(Self::child_stream_to_vec(p.stdout.take().expect("!stdout")));
+        self.stderr = Some(Self::child_stream_to_vec(p.stderr.take().expect("!stderr")));
+
+        //let com = p.communicate_start(None);
+
+        self.proc = Some(p);
+    }
 }
 
 fn handle_client(stream: &mut TcpStream) -> Result<()> {
@@ -95,14 +157,25 @@ fn handle_client(stream: &mut TcpStream) -> Result<()> {
 
     msg_stream.begin_read(stream, false)?;
 
-    //let mut filebuffer = Vec::new();
+    // Setup a context so we can keep track of a running process and such
+    let mut context = Context::default();
 
     loop {
         let msg = msg_stream.update(stream)?;
 
         match msg {
-            Some(msg) => handle_incoming_msg(&mut msg_stream, stream, msg)?,
+            Some(msg) => context.handle_incoming_msg(&mut msg_stream, stream, msg)?,
             _ => (),
+        }
+
+        if let Some(stdout) = context.stdout.as_mut() {
+            let mut data = stdout.lock().unwrap();
+            for i in data.iter() {
+                let c = *i as char;
+                print!("{}", c);
+            }
+
+            data.clear();
         }
 
         std::thread::sleep(std::time::Duration::from_millis(1));
@@ -125,37 +198,37 @@ pub fn target_loop(_opts: &Opt) {
 }
 
 /*
-match id {
-    START_FILE => {
-        let filename = std::str::from_utf8(&data[1..bytes_read]).unwrap();
-        println!("Client is about to send {} (len {})", filename, bytes_read);
-    }
+   match id {
+   START_FILE => {
+   let filename = std::str::from_utf8(&data[1..bytes_read]).unwrap();
+   println!("Client is about to send {} (len {})", filename, bytes_read);
+   }
 
-    FILE_CHUNK => {
-        println!("Got file chunk size {}", bytes_read);
-        copy_data(&mut filebuffer, &data[1..bytes_read]);
-    }
+   FILE_CHUNK => {
+   println!("Got file chunk size {}", bytes_read);
+   copy_data(&mut filebuffer, &data[1..bytes_read]);
+   }
 
-    END_FILE => {
-        println!("Got file end chunk size {}", bytes_read);
-        copy_data(&mut filebuffer, &data[1..bytes_read]);
+   END_FILE => {
+   println!("Got file end chunk size {}", bytes_read);
+   copy_data(&mut filebuffer, &data[1..bytes_read]);
 
-        {
-            let mut file = File::create("test")?;
-            file.write_all(&filebuffer)?;
-        }
+   {
+   let mut file = File::create("test")?;
+   file.write_all(&filebuffer)?;
+   }
 
-        // make exe executable
-        std::fs::set_permissions("test", std::fs::Permissions::from_mode(0o700)).unwrap();
+// make exe executable
+std::fs::set_permissions("test", std::fs::Permissions::from_mode(0o700)).unwrap();
 
-        let output = Command::new("./test")
-            .output()
-            .expect("failed to execute process");
+let output = Command::new("./test")
+.output()
+.expect("failed to execute process");
 
-        println!("status: {}", output.status);
-        std::io::stdout().write_all(&output.stdout).unwrap();
-    }
+println!("status: {}", output.status);
+std::io::stdout().write_all(&output.stdout).unwrap();
+}
 
-    _ => (),
+_ => (),
 }
 */

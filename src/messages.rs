@@ -20,7 +20,9 @@ pub enum Messages {
     LaunchExecutableReply = 3,
     StopExecutableRequest = 4,
     StopExecutableReply = 5,
-    NoMessage = 6,
+    StdoutOutput = 6,
+    StderrOutput = 7,
+    NoMessage = 8,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -39,6 +41,11 @@ pub struct FistbumpReply {
 pub struct LaunchExecutableRequest<'a> {
     pub file_server: bool,
     pub path: &'a str,
+    pub data: &'a [u8],
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct TextMessage<'a> {
     pub data: &'a [u8],
 }
 

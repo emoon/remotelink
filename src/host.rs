@@ -1,5 +1,3 @@
-//use std::fs::File;
-//use std::io::{BufReader, Error, Read, Write};
 use anyhow::*;
 use std::fs::File;
 use std::io::{Read, Write};
@@ -56,10 +54,18 @@ fn fistbump<T: Write + Read>(stream: &mut T) -> Result<()> {
 
 /// Handles incoming messages and sends back reply (if needed)
 fn handle_incoming_msg<S: Write + Read>(
-    _msg_stream: &mut MessageStream,
-    _stream: &mut S,
-    _message: Messages,
+    msg_stream: &mut MessageStream,
+    stream: &mut S,
+    message: Messages,
 ) -> Result<()> {
+    match message {
+        Messages::StdoutOutput => {
+            let msg: TextMessage = bincode::deserialize(&msg_stream.data)?;
+        }
+
+        _ => (),
+    }
+
     Ok(())
 }
 
@@ -108,7 +114,7 @@ pub fn host_loop(opts: &Opt, _ip_address: &str) -> Result<()> {
     // read file to be sent
 
     if let Some(target) = opts.filename.as_ref() {
-        send_file(&mut msg_stream, &mut stream, &target)?;
+        send_file(&mut msg_stream, &mut stream, target)?;
     }
 
     loop {
