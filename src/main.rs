@@ -16,7 +16,7 @@ use structopt::StructOpt;
 fn main() -> Result<()> {
     let opt = Opt::from_args();
 
-    log::set_log_level(log::LOG_TRACE);
+    log::set_log_level(log::LOG_ERROR);
 
     if opt.host {
         println!("Starting target");

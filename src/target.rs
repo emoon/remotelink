@@ -1,6 +1,6 @@
 use crate::message_stream::{MessageStream, TransitionToRead};
 use crate::messages;
-use crate::messages::{FistbumpReply, FistbumpRequest, Messages};
+use crate::messages::*;
 use crate::options::*;
 use anyhow::*;
 use std::fs::File;
@@ -24,18 +24,17 @@ struct Context {
 }
 
 impl Context {
-    /// Handles incoming messages and sends back reply (if needed)
+    /// Handles incoming messages and sends back reply (if needed) if returns false it means we
+    /// should exit the update
     pub fn handle_incoming_msg<S: Write + Read>(
         &mut self,
         msg_stream: &mut MessageStream,
         stream: &mut S,
         message: Messages,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         match message {
             Messages::FistbumpRequest => {
                 let msg: FistbumpRequest = bincode::deserialize(&msg_stream.data)?;
-
-                println!("target: got FistbumpRequest");
 
                 if msg.version_major != messages::REMOTELINK_MAJOR_VERSION {
                     return Err(anyhow!(
@@ -60,22 +59,47 @@ impl Context {
                     Messages::FistbumpReply,
                     TransitionToRead::Yes,
                 )?;
-
-                println!("target: sending data back");
             }
 
+            Messages::StopExecutableRequest => {
+                if let Some(proc) = self.proc.as_mut() {
+                    proc.kill()?;
+                }
+
+                let stop_reply = StopExecutableReply::default();
+
+                msg_stream.begin_write_message(
+                    stream,
+                    &stop_reply,
+                    Messages::StopExecutableReply,
+                    TransitionToRead::Yes,
+                )?;
+
+                return Ok(false);
+            },
+
             Messages::LaunchExecutableRequest => {
-                dbg!(msg_stream.data.len());
                 let file: bincode::Result<messages::LaunchExecutableRequest> =
                     bincode::deserialize(&msg_stream.data);
 
                 match file {
                     Ok(f) => {
                         self.start_executable(&f);
+
+                        let exe_launch = LaunchExecutableReply {
+                            launch_status: 0,
+                            error_info: None,
+                        };
+
+                        msg_stream.begin_write_message(
+                            stream,
+                            &exe_launch,
+                            Messages::LaunchExecutableReply,
+                            TransitionToRead::Yes,
+                        )?;
                     }
 
                     Err(e) => {
-                        dbg!(&e);
                         panic!("{}", e);
                     }
                 }
@@ -87,7 +111,7 @@ impl Context {
             }
         }
 
-        Ok(())
+        Ok(true)
     }
 
     /// Pipe streams are blocking, we need separate threads to monitor them without blocking the primary thread.
@@ -134,16 +158,13 @@ impl Context {
         std::fs::set_permissions("test", std::fs::Permissions::from_mode(0o700)).unwrap();
 
         let mut p = Command::new("./test")
-                .stderr(Stdio::piped())
-                .stdout(Stdio::piped())
-                .spawn()
-                .expect("failed to execute child");
+            .stderr(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("failed to execute child");
 
         self.stdout = Some(Self::child_stream_to_vec(p.stdout.take().expect("!stdout")));
         self.stderr = Some(Self::child_stream_to_vec(p.stderr.take().expect("!stderr")));
-
-        //let com = p.communicate_start(None);
-
         self.proc = Some(p);
     }
 }
@@ -164,18 +185,30 @@ fn handle_client(stream: &mut TcpStream) -> Result<()> {
         let msg = msg_stream.update(stream)?;
 
         match msg {
-            Some(msg) => context.handle_incoming_msg(&mut msg_stream, stream, msg)?,
+            Some(msg) => {
+                if !context.handle_incoming_msg(&mut msg_stream, stream, msg)? {
+                    println!("exit client");
+                    return Ok(());
+                }
+            },
             _ => (),
         }
 
         if let Some(stdout) = context.stdout.as_mut() {
             let mut data = stdout.lock().unwrap();
-            for i in data.iter() {
-                let c = *i as char;
-                print!("{}", c);
-            }
 
-            data.clear();
+            if !data.is_empty() {
+                let text_message = TextMessage { data: &data };
+
+                msg_stream.begin_write_message(
+                    stream,
+                    &text_message,
+                    Messages::StdoutOutput,
+                    TransitionToRead::Yes,
+                )?;
+
+                data.clear();
+            }
         }
 
         std::thread::sleep(std::time::Duration::from_millis(1));
@@ -196,39 +229,3 @@ pub fn target_loop(_opts: &Opt) {
         }
     }
 }
-
-/*
-   match id {
-   START_FILE => {
-   let filename = std::str::from_utf8(&data[1..bytes_read]).unwrap();
-   println!("Client is about to send {} (len {})", filename, bytes_read);
-   }
-
-   FILE_CHUNK => {
-   println!("Got file chunk size {}", bytes_read);
-   copy_data(&mut filebuffer, &data[1..bytes_read]);
-   }
-
-   END_FILE => {
-   println!("Got file end chunk size {}", bytes_read);
-   copy_data(&mut filebuffer, &data[1..bytes_read]);
-
-   {
-   let mut file = File::create("test")?;
-   file.write_all(&filebuffer)?;
-   }
-
-// make exe executable
-std::fs::set_permissions("test", std::fs::Permissions::from_mode(0o700)).unwrap();
-
-let output = Command::new("./test")
-.output()
-.expect("failed to execute process");
-
-println!("status: {}", output.status);
-std::io::stdout().write_all(&output.stdout).unwrap();
-}
-
-_ => (),
-}
-*/

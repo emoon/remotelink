@@ -1,7 +1,9 @@
 use anyhow::*;
+use ctrlc;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::net::TcpStream;
+use std::sync::mpsc::channel;
 
 use crate::message_stream::{MessageStream, TransitionToRead};
 use crate::messages::*;
@@ -14,8 +16,6 @@ fn fistbump<T: Write + Read>(stream: &mut T) -> Result<()> {
     };
 
     let mut msg_stream = MessageStream::new();
-
-    println!("host: sending message");
 
     // as socket is in blocking mode at this point we expect this to return with the correct data directly
     if !msg_stream.begin_write_message(
@@ -61,10 +61,23 @@ fn handle_incoming_msg<S: Write + Read>(
     match message {
         Messages::StdoutOutput => {
             let msg: TextMessage = bincode::deserialize(&msg_stream.data)?;
+            let text = std::str::from_utf8(msg.data)?;
+            print!("{}", text);
+
+            // make sure stream starts reading again
+            //msg_stream.begin_read(stream, true)?;
+        }
+
+        Messages::LaunchExecutableReply => {
+            // TODO: Verify that the executable launched correct
+            // make sure stream starts reading again
+            //msg_stream.begin_read(stream, true)?;
         }
 
         _ => (),
     }
+
+    msg_stream.begin_read(stream, true)?;
 
     Ok(())
 }
@@ -74,8 +87,6 @@ fn send_file<S: Write + Read>(
     stream: &mut S,
     filename: &str,
 ) -> Result<()> {
-    dbg!();
-
     let mut buffer = Vec::new();
     let mut f = File::open(filename)?;
     f.read_to_end(&mut buffer)?;
@@ -94,15 +105,41 @@ fn send_file<S: Write + Read>(
         TransitionToRead::Yes,
     )?;
 
-    dbg!();
+    Ok(())
+}
+
+fn close_down_exe<S: Write + Read>(
+    msg_stream: &mut MessageStream,
+    stream: &mut S,
+) -> Result<()> {
+    let stop_request = StopExecutableRequest::default();
+    msg_stream.begin_write_message(
+        stream,
+        &stop_request,
+        Messages::StopExecutableRequest,
+        TransitionToRead::Yes,
+    )?;
+
+    // wait 30 ms for the reply, then just the client
+
+    for _ in 0..30 {
+        if let Some(msg) = msg_stream.update(stream)? {
+            match msg {
+                Messages::StopExecutableReply => {
+                    return Ok(());
+                },
+                _ => (),
+            }
+        }
+
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
 
     Ok(())
 }
 
 pub fn host_loop(opts: &Opt, _ip_address: &str) -> Result<()> {
     let mut stream = TcpStream::connect("127.0.0.1:8888")?;
-
-    println!("connection made");
 
     fistbump(&mut stream)?;
 
@@ -117,9 +154,19 @@ pub fn host_loop(opts: &Opt, _ip_address: &str) -> Result<()> {
         send_file(&mut msg_stream, &mut stream, target)?;
     }
 
+    // setup ctrl-c handler
+    let (tx, rx) = channel();
+
+    ctrlc::set_handler(move || tx.send(()).expect("Could not send signal on channel."))
+        .expect("Error setting Ctrl-C handler");
+
     loop {
         if let Some(msg) = msg_stream.update(&mut stream)? {
             handle_incoming_msg(&mut msg_stream, &mut stream, msg)?;
+        }
+
+        if rx.try_recv().is_ok() {
+            return close_down_exe(&mut msg_stream, &mut stream);
         }
 
         // don't hammer the CPU
@@ -127,30 +174,3 @@ pub fn host_loop(opts: &Opt, _ip_address: &str) -> Result<()> {
     }
 }
 
-/*
-  if let Some(filename) = opts.filename.as_ref() {
-  let mut data: [u8; 1024] = [0; 1024];
-  let chunk_size = 1023;
-  let mut file = File::open(&filename).unwrap();
-
-  init_packet(&mut data, filename.as_bytes(), START_FILE);
-  stream.write_all(&data).unwrap();
-
-  loop {
-  let size = file.read(&mut data[1..]).unwrap();
-  data[0] = FILE_CHUNK;
-
-  if size != chunk_size {
-  data[0] = END_FILE;
-  }
-
-  stream.write_all(&data).unwrap();
-
-  if size < chunk_size {
-  break;
-  }
-  }
-
-  thread::sleep(std::time::Duration::from_millis(500));
-  }
-*/

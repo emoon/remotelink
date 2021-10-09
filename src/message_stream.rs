@@ -59,9 +59,7 @@ impl MessageStream {
     /// Update the state machine. Will return a Some(Message) when a read request has finished.
     /// For writes no state will be given back
     pub fn update<S: Write + Read>(&mut self, stream: &mut S) -> Result<Option<Messages>> {
-        if self.state != State::Complete {
-            trace!("update state {:?}", self.state);
-        }
+        //trace!("update state {:?}", self.state);
 
         match self.state {
             State::WriteHeader => {
@@ -69,7 +67,6 @@ impl MessageStream {
                 // We have switched state to write data, we try to write it here as well
                 // to finish it as early as possible
                 if self.state == State::WriteData {
-                    dbg!();
                     self.write_data(stream)?;
                 }
 
@@ -93,7 +90,6 @@ impl MessageStream {
             }
 
             State::ReadData => {
-                dbg!();
                 self.read_data(stream)
             }
 
@@ -132,9 +128,11 @@ impl MessageStream {
         trans_to_read: TransitionToRead,
     ) -> Result<bool> {
         // Make sure we can make progress
-        if self.state != State::Complete {
-            return Ok(false);
-        }
+        //if self.state != State::Complete {
+        //    return Ok(false);
+        //}
+
+        self.data.clear();
 
         bincode::serialize_into(&mut self.data, data)?;
 
@@ -248,7 +246,7 @@ impl MessageStream {
     /// Reads header data to self, returns number of bytes read
     fn read_header<S: Write + Read>(&mut self, stream: &mut S) -> Result<usize> {
         self.header_offset += Self::read(&mut self.header[self.header_offset..], stream)?;
-        trace!("read_header total bytes {} read", self.header_offset);
+        //trace!("read_header total bytes {} read", self.header_offset);
 
         if self.header_offset == 8 {
             let msg_type = self.header[0];

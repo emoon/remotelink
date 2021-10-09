@@ -50,10 +50,16 @@ pub struct TextMessage<'a> {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct LaunchExecutableReplay<'a> {
+pub struct LaunchExecutableReply<'a> {
     pub launch_status: i32,
     pub error_info: Option<&'a str>,
 }
+
+#[derive(Serialize, Deserialize, Debug, Default)]
+pub struct StopExecutableRequest { dummy: u32 }
+
+#[derive(Serialize, Deserialize, Debug, Default)]
+pub struct StopExecutableReply { dummy: u32 }
 
 #[derive(Copy, Clone)]
 pub struct Header {
