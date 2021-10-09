@@ -89,9 +89,7 @@ impl MessageStream {
                 }
             }
 
-            State::ReadData => {
-                self.read_data(stream)
-            }
+            State::ReadData => self.read_data(stream),
 
             State::Complete => Ok(None),
         }

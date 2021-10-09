@@ -56,10 +56,14 @@ pub struct LaunchExecutableReply<'a> {
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]
-pub struct StopExecutableRequest { dummy: u32 }
+pub struct StopExecutableRequest {
+    dummy: u32,
+}
 
 #[derive(Serialize, Deserialize, Debug, Default)]
-pub struct StopExecutableReply { dummy: u32 }
+pub struct StopExecutableReply {
+    dummy: u32,
+}
 
 #[derive(Copy, Clone)]
 pub struct Header {

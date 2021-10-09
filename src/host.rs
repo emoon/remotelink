@@ -108,10 +108,7 @@ fn send_file<S: Write + Read>(
     Ok(())
 }
 
-fn close_down_exe<S: Write + Read>(
-    msg_stream: &mut MessageStream,
-    stream: &mut S,
-) -> Result<()> {
+fn close_down_exe<S: Write + Read>(msg_stream: &mut MessageStream, stream: &mut S) -> Result<()> {
     let stop_request = StopExecutableRequest::default();
     msg_stream.begin_write_message(
         stream,
@@ -127,7 +124,7 @@ fn close_down_exe<S: Write + Read>(
             match msg {
                 Messages::StopExecutableReply => {
                     return Ok(());
-                },
+                }
                 _ => (),
             }
         }
@@ -173,4 +170,3 @@ pub fn host_loop(opts: &Opt, _ip_address: &str) -> Result<()> {
         std::thread::sleep(std::time::Duration::from_millis(1));
     }
 }
-

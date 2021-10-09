@@ -76,7 +76,7 @@ impl Context {
                 )?;
 
                 return Ok(false);
-            },
+            }
 
             Messages::LaunchExecutableRequest => {
                 let file: bincode::Result<messages::LaunchExecutableRequest> =
@@ -190,7 +190,7 @@ fn handle_client(stream: &mut TcpStream) -> Result<()> {
                     println!("exit client");
                     return Ok(());
                 }
-            },
+            }
             _ => (),
         }
 
