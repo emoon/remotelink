@@ -5,6 +5,7 @@ Remotelink is a tool that allows you to run executables on another system over n
 ## Disclaimer
 
 Running `remotlink --host` on a machine is **very insecure** as it allows others to run any code on your target. Only use this tool if you know what you are doing.
+This tool is currently also very much WIP.
 
 ## How to use
 
