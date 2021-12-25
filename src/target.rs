@@ -10,6 +10,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use core::result::Result::Ok;
 
 type IoOut = Arc<Mutex<Vec<u8>>>;
 

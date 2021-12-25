@@ -1,8 +1,8 @@
 use std::fmt;
 
 pub const LOG_TRACE: i32 = 0;
-pub const LOG_DEBUG: i32 = 1;
-pub const LOG_INFO: i32 = 2;
+//pub const LOG_DEBUG: i32 = 1;
+//pub const LOG_INFO: i32 = 2;
 pub const LOG_WARN: i32 = 3;
 pub const LOG_ERROR: i32 = 4;
 

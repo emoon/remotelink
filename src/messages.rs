@@ -1,9 +1,9 @@
-use anyhow::Result;
-use bincode;
-use serde::de::Deserialize;
-use serde::ser::Serialize;
-use std::io::{Read, Write};
-use std::mem::transmute;
+//use anyhow::Result;
+//use bincode;
+//use serde::de::Deserialize;
+//use serde::ser::Serialize;
+//use std::io::{Read, Write};
+//use std::mem::transmute;
 
 pub const REMOTELINK_MAJOR_VERSION: u8 = 0;
 pub const REMOTELINK_MINOR_VERSION: u8 = 1;
@@ -21,7 +21,6 @@ pub enum Messages {
     StopExecutableRequest = 4,
     StopExecutableReply = 5,
     StdoutOutput = 6,
-    StderrOutput = 7,
     NoMessage = 8,
 }
 
