@@ -3,6 +3,7 @@ use crate::messages;
 use crate::messages::*;
 use crate::options::*;
 use anyhow::*;
+use core::result::Result::Ok;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -10,7 +11,6 @@ use std::os::unix::fs::PermissionsExt;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use core::result::Result::Ok;
 
 type IoOut = Arc<Mutex<Vec<u8>>>;
 

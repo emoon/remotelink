@@ -1,11 +1,11 @@
 use crate::messages::Messages;
 use crate::trace;
 use anyhow::*;
+use core::result::Result::Ok;
 use serde::ser::Serialize;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::Hasher;
 use std::io::{Read, Write};
-use core::result::Result::Ok;
 
 /// These are all the states that is needed to write to the output
 /// This supports writing it non-blocking fashion and can pickup where it left of.
