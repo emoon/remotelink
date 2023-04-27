@@ -1,16 +1,16 @@
-pub use structopt::StructOpt;
+pub use clap::Parser;
 
-#[derive(StructOpt, Debug)]
-#[structopt(name = "Remotelink")]
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
 pub struct Opt {
-    #[structopt(short, long)]
+    #[arg(short, long)]
     pub debug: bool,
-    #[structopt(short, long)]
+    #[arg(short, long)]
     pub host: bool,
-    #[structopt(short, long, default_value = "8888")]
+    #[arg(short, long, default_value = "8888")]
     pub port: u16,
-    #[structopt(short, long)]
+    #[arg(short, long)]
     pub target: Option<String>,
-    #[structopt(short, long)]
+    #[arg(short, long)]
     pub filename: Option<String>,
 }

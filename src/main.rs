@@ -1,6 +1,3 @@
-#[macro_use]
-extern crate serde_derive;
-
 mod host;
 mod log;
 mod message_stream;
@@ -8,13 +5,13 @@ mod messages;
 mod options;
 mod target;
 mod tests;
+use clap::Parser;
 
 use crate::options::Opt;
 use anyhow::Result;
-use structopt::StructOpt;
 
 fn main() -> Result<()> {
-    let opt = Opt::from_args();
+    let opt = Opt::parse();
 
     log::set_log_level(log::LOG_ERROR);
 

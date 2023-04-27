@@ -1,9 +1,4 @@
-//use anyhow::Result;
-//use bincode;
-//use serde::de::Deserialize;
-//use serde::ser::Serialize;
-//use std::io::{Read, Write};
-//use std::mem::transmute;
+use serde::{Serialize, Deserialize};
 
 pub const REMOTELINK_MAJOR_VERSION: u8 = 0;
 pub const REMOTELINK_MINOR_VERSION: u8 = 1;
