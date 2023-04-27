@@ -3,7 +3,7 @@ mod log;
 mod message_stream;
 mod messages;
 mod options;
-mod target;
+mod remote_runner;
 mod tests;
 use clap::Parser;
 
@@ -15,9 +15,9 @@ fn main() -> Result<()> {
 
     log::set_log_level(log::LOG_ERROR);
 
-    if opt.host {
-        println!("Starting target");
-        target::target_loop(&opt);
+    if opt.remote_runner {
+        println!("Starting remote-runner");
+        remote_runner::update(&opt);
     } else {
         println!("Starting host");
         host::host_loop(&opt, opt.target.as_ref().unwrap())?;

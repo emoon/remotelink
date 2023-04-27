@@ -10,7 +10,7 @@ use crate::messages::*;
 use crate::options::Opt;
 
 fn fistbump<T: Write + Read>(stream: &mut T) -> Result<()> {
-    let fistbump_request = FistbumpRequest {
+    let fistbump_request = HandshakeRequest {
         version_major: REMOTELINK_MAJOR_VERSION,
         version_minor: REMOTELINK_MINOR_VERSION,
     };
@@ -21,7 +21,7 @@ fn fistbump<T: Write + Read>(stream: &mut T) -> Result<()> {
     if !msg_stream.begin_write_message(
         stream,
         &fistbump_request,
-        Messages::FistbumpRequest,
+        Messages::HandshakeRequest,
         TransitionToRead::No,
     )? {
         return Err(anyhow!(
@@ -31,12 +31,12 @@ fn fistbump<T: Write + Read>(stream: &mut T) -> Result<()> {
 
     match msg_stream.begin_read(stream, true)? {
         Some(msg) => {
-            if msg == Messages::FistbumpReply {
-                let _message: FistbumpReply = bincode::deserialize(&msg_stream.data)?;
+            if msg == Messages::HandshakeReply {
+                let _message: HandshakeReply = bincode::deserialize(&msg_stream.data)?;
             // TODO: validate that versions match
             } else {
                 return Err(anyhow!(
-                    "Incorrect message returned for FistbumpRequest {:?}",
+                    "Incorrect message returned for HandshakeRequest {:?}",
                     msg
                 ));
             }

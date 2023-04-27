@@ -34,8 +34,8 @@ impl Context {
         message: Messages,
     ) -> Result<bool> {
         match message {
-            Messages::FistbumpRequest => {
-                let msg: FistbumpRequest = bincode::deserialize(&msg_stream.data)?;
+            Messages::HandshakeRequest => {
+                let msg: HandshakeRequest = bincode::deserialize(&msg_stream.data)?;
 
                 if msg.version_major != messages::REMOTELINK_MAJOR_VERSION {
                     return Err(anyhow!(
@@ -49,15 +49,15 @@ impl Context {
                     println!("Minor version miss-matching, but continuing");
                 }
 
-                let fistbump_reply = FistbumpReply {
+                let handshake_reply = HandshakeReply {
                     version_major: messages::REMOTELINK_MAJOR_VERSION,
                     version_minor: messages::REMOTELINK_MINOR_VERSION,
                 };
 
                 msg_stream.begin_write_message(
                     stream,
-                    &fistbump_reply,
-                    Messages::FistbumpReply,
+                    &handshake_reply,
+                    Messages::HandshakeReply,
                     TransitionToRead::Yes,
                 )?;
             }
@@ -152,7 +152,7 @@ impl Context {
 
         {
             let mut file = File::create("test").unwrap();
-            file.write_all(&f.data).unwrap();
+            file.write_all(f.data).unwrap();
         }
 
         // make exe executable
@@ -216,7 +216,7 @@ fn handle_client(stream: &mut TcpStream) -> Result<()> {
     }
 }
 
-pub fn target_loop(_opts: &Opt) {
+pub fn update(_opts: &Opt) {
     let listener = TcpListener::bind("0.0.0.0:8888").expect("Could not bind");
     println!("Wating incoming host");
     for stream in listener.incoming() {

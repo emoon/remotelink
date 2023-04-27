@@ -9,8 +9,8 @@ pub const REMOTELINK_MINOR_VERSION: u8 = 1;
 #[repr(u8)]
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub enum Messages {
-    FistbumpRequest = 0,
-    FistbumpReply = 1,
+    HandshakeRequest = 0,
+    HandshakeReply = 1,
     LaunchExecutableRequest = 2,
     LaunchExecutableReply = 3,
     StopExecutableRequest = 4,
@@ -20,13 +20,13 @@ pub enum Messages {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct FistbumpRequest {
+pub struct HandshakeRequest {
     pub version_major: u8,
     pub version_minor: u8,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct FistbumpReply {
+pub struct HandshakeReply {
     pub version_major: u8,
     pub version_minor: u8,
 }

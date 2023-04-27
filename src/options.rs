@@ -6,7 +6,7 @@ pub struct Opt {
     #[arg(short, long)]
     pub debug: bool,
     #[arg(short, long)]
-    pub host: bool,
+    pub remote_runner: bool,
     #[arg(short, long, default_value = "8888")]
     pub port: u16,
     #[arg(short, long)]
