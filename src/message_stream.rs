@@ -1,7 +1,7 @@
 use crate::messages::Messages;
-use crate::trace;
 use anyhow::*;
 use core::result::Result::Ok;
+use log::trace;
 use serde::ser::Serialize;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::Hasher;
@@ -60,8 +60,6 @@ impl MessageStream {
     /// Update the state machine. Will return a Some(Message) when a read request has finished.
     /// For writes no state will be given back
     pub fn update<S: Write + Read>(&mut self, stream: &mut S) -> Result<Option<Messages>> {
-        //trace!("update state {:?}", self.state);
-
         match self.state {
             State::WriteHeader => {
                 self.write_header(stream)?;
@@ -90,7 +88,9 @@ impl MessageStream {
                 }
             }
 
-            State::ReadData => self.read_data(stream),
+            State::ReadData => {
+                self.read_data(stream)
+            }
 
             State::Complete => Ok(None),
         }
@@ -255,11 +255,11 @@ impl MessageStream {
                 | ((self.header[4] as u64) << 24)
                 | ((self.header[5] as u64) << 16)
                 | ((self.header[6] as u64) << 8)
-                | (self.header[7] as u64)) as usize;
+                | (self.header[7] as u64)) as u64;
 
             assert!(size < 0xffff_ffff_ffff);
             // TODO: Optimize
-            self.data.resize(size, 0xff);
+            self.data.resize(size as _, 0xff);
             self.message = unsafe { std::mem::transmute(msg_type) };
             self.state = State::ReadData;
         }

@@ -1,5 +1,5 @@
 use anyhow::*;
-use ctrlc;
+use log::{trace, warn};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -9,8 +9,8 @@ use crate::message_stream::{MessageStream, TransitionToRead};
 use crate::messages::*;
 use crate::options::Opt;
 
-fn fistbump<T: Write + Read>(stream: &mut T) -> Result<()> {
-    let fistbump_request = HandshakeRequest {
+fn handshake<T: Write + Read>(stream: &mut T) -> Result<()> {
+    let handshake_request = HandshakeRequest {
         version_major: REMOTELINK_MAJOR_VERSION,
         version_minor: REMOTELINK_MINOR_VERSION,
     };
@@ -20,7 +20,7 @@ fn fistbump<T: Write + Read>(stream: &mut T) -> Result<()> {
     // as socket is in blocking mode at this point we expect this to return with the correct data directly
     if !msg_stream.begin_write_message(
         stream,
-        &fistbump_request,
+        &handshake_request,
         Messages::HandshakeRequest,
         TransitionToRead::No,
     )? {
@@ -58,11 +58,16 @@ fn handle_incoming_msg<S: Write + Read>(
     stream: &mut S,
     message: Messages,
 ) -> Result<()> {
+    trace!("Message received: {:?}", message);
+    dbg!(&message);
+
     match message {
         Messages::StdoutOutput => {
             let msg: TextMessage = bincode::deserialize(&msg_stream.data)?;
+            trace!("TextMessage got");
             let text = std::str::from_utf8(msg.data)?;
             print!("{}", text);
+            trace!("TextMessage printed");
 
             // make sure stream starts reading again
             //msg_stream.begin_read(stream, true)?;
@@ -77,7 +82,8 @@ fn handle_incoming_msg<S: Write + Read>(
         _ => (),
     }
 
-    msg_stream.begin_read(stream, true)?;
+    trace!("Message handled, begin read again");
+    msg_stream.begin_read(stream, false)?;
 
     Ok(())
 }
@@ -121,26 +127,29 @@ fn close_down_exe<S: Write + Read>(msg_stream: &mut MessageStream, stream: &mut 
 
     for _ in 0..30 {
         if let Some(msg) = msg_stream.update(stream)? {
-            match msg {
-                Messages::StopExecutableReply => {
-                    return Ok(());
-                }
-                _ => (),
+            if msg == Messages::StopExecutableReply {
+                trace!("StopExecutableReply received, closing down");
+                return Ok(());
             }
         }
 
         std::thread::sleep(std::time::Duration::from_millis(1));
     }
 
+    trace!("No reply from client, closing down anyway");
+
     Ok(())
 }
 
-pub fn host_loop(opts: &Opt, _ip_address: &str) -> Result<()> {
-    let mut stream = TcpStream::connect("127.0.0.1:8888")?;
+pub fn host_loop(opts: &Opt, ip_address: &str) -> Result<()> {
+    let ip_adress: std::net::IpAddr = ip_address.parse()?;
+    let address = std::net::SocketAddr::new(ip_adress, opts.port);
 
-    fistbump(&mut stream)?;
+    let mut stream = TcpStream::connect(address)?;
 
-    // set non-blocking mode after fistbump
+    handshake(&mut stream)?;
+
+    // set non-blocking mode after handshake
     stream.set_nonblocking(true)?;
 
     let mut msg_stream = MessageStream::new();
@@ -157,12 +166,16 @@ pub fn host_loop(opts: &Opt, _ip_address: &str) -> Result<()> {
     ctrlc::set_handler(move || tx.send(()).expect("Could not send signal on channel."))
         .expect("Error setting Ctrl-C handler");
 
+    //
     loop {
-        if let Some(msg) = msg_stream.update(&mut stream)? {
-            handle_incoming_msg(&mut msg_stream, &mut stream, msg)?;
+        if let Some(msg) = msg_stream.update(&mut stream).unwrap() {
+            warn!("Handle incoming message {:?}", msg);
+            handle_incoming_msg(&mut msg_stream, &mut stream, msg).unwrap();
+            warn!("done incoming message");
         }
 
         if rx.try_recv().is_ok() {
+            trace!("Ctrl-C received, closing down");
             return close_down_exe(&mut msg_stream, &mut stream);
         }
 

@@ -1,4 +1,4 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 pub const REMOTELINK_MAJOR_VERSION: u8 = 0;
 pub const REMOTELINK_MINOR_VERSION: u8 = 1;

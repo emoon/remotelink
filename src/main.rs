@@ -1,5 +1,4 @@
 mod host;
-mod log;
 mod message_stream;
 mod messages;
 mod options;
@@ -9,11 +8,25 @@ use clap::Parser;
 
 use crate::options::Opt;
 use anyhow::Result;
+use log::LevelFilter;
+use simple_logger::SimpleLogger;
 
 fn main() -> Result<()> {
     let opt = Opt::parse();
 
-    log::set_log_level(log::LOG_ERROR);
+    let level = match opt.log_level.as_str() {
+        "error" => LevelFilter::Error,
+        "warn" => LevelFilter::Warn,
+        "info" => LevelFilter::Info,
+        "debug" => LevelFilter::Debug,
+        "trace" => LevelFilter::Trace,
+        _ => LevelFilter::Warn,
+    };
+
+    SimpleLogger::new()
+        .with_level(level)
+        .with_colors(true)
+        .init()?;
 
     if opt.remote_runner {
         println!("Starting remote-runner");
