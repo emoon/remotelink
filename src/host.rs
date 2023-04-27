@@ -1,5 +1,5 @@
 use anyhow::*;
-use log::{trace, warn};
+use log::{trace};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -59,7 +59,6 @@ fn handle_incoming_msg<S: Write + Read>(
     message: Messages,
 ) -> Result<()> {
     trace!("Message received: {:?}", message);
-    dbg!(&message);
 
     match message {
         Messages::StdoutOutput => {
@@ -169,9 +168,7 @@ pub fn host_loop(opts: &Opt, ip_address: &str) -> Result<()> {
     //
     loop {
         if let Some(msg) = msg_stream.update(&mut stream).unwrap() {
-            warn!("Handle incoming message {:?}", msg);
             handle_incoming_msg(&mut msg_stream, &mut stream, msg).unwrap();
-            warn!("done incoming message");
         }
 
         if rx.try_recv().is_ok() {
