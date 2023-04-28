@@ -1,5 +1,5 @@
 use anyhow::*;
-use log::{trace};
+use log::trace;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -63,10 +63,8 @@ fn handle_incoming_msg<S: Write + Read>(
     match message {
         Messages::StdoutOutput => {
             let msg: TextMessage = bincode::deserialize(&msg_stream.data)?;
-            trace!("TextMessage got");
             let text = std::str::from_utf8(msg.data)?;
             print!("{}", text);
-            trace!("TextMessage printed");
 
             // make sure stream starts reading again
             //msg_stream.begin_read(stream, true)?;

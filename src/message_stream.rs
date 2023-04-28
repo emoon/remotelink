@@ -249,13 +249,13 @@ impl MessageStream {
 
         if self.header_offset == 8 {
             let msg_type = self.header[0];
-            let size = (((self.header[1] as u64) << 48)
+            let size = ((self.header[1] as u64) << 48)
                 | ((self.header[2] as u64) << 40)
                 | ((self.header[3] as u64) << 32)
                 | ((self.header[4] as u64) << 24)
                 | ((self.header[5] as u64) << 16)
                 | ((self.header[6] as u64) << 8)
-                | (self.header[7] as u64)) as u64;
+                | (self.header[7] as u64);
 
             assert!(size < 0xffff_ffff_ffff);
             // TODO: Optimize
