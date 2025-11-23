@@ -1,3 +1,4 @@
+use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
 pub const REMOTELINK_MAJOR_VERSION: u8 = 0;
@@ -16,6 +17,24 @@ pub enum Messages {
     StopExecutableReply = 5,
     StdoutOutput = 6,
     NoMessage = 8,
+}
+
+impl Messages {
+    /// Safely converts a u8 to a Messages enum variant.
+    /// Returns an error if the value doesn't correspond to a valid message type.
+    pub fn from_u8(value: u8) -> Result<Self> {
+        match value {
+            0 => Ok(Messages::HandshakeRequest),
+            1 => Ok(Messages::HandshakeReply),
+            2 => Ok(Messages::LaunchExecutableRequest),
+            3 => Ok(Messages::LaunchExecutableReply),
+            4 => Ok(Messages::StopExecutableRequest),
+            5 => Ok(Messages::StopExecutableReply),
+            6 => Ok(Messages::StdoutOutput),
+            8 => Ok(Messages::NoMessage),
+            _ => Err(anyhow!("Invalid message type: {}", value)),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -92,3 +111,39 @@ data: Vec<u8>,
 }
 
 */
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_from_u8_valid_messages() {
+        assert!(matches!(Messages::from_u8(0).unwrap(), Messages::HandshakeRequest));
+        assert!(matches!(Messages::from_u8(1).unwrap(), Messages::HandshakeReply));
+        assert!(matches!(Messages::from_u8(2).unwrap(), Messages::LaunchExecutableRequest));
+        assert!(matches!(Messages::from_u8(3).unwrap(), Messages::LaunchExecutableReply));
+        assert!(matches!(Messages::from_u8(4).unwrap(), Messages::StopExecutableRequest));
+        assert!(matches!(Messages::from_u8(5).unwrap(), Messages::StopExecutableReply));
+        assert!(matches!(Messages::from_u8(6).unwrap(), Messages::StdoutOutput));
+        assert!(matches!(Messages::from_u8(8).unwrap(), Messages::NoMessage));
+    }
+
+    #[test]
+    fn test_from_u8_invalid_messages() {
+        // Test various invalid values
+        assert!(Messages::from_u8(7).is_err());
+        assert!(Messages::from_u8(9).is_err());
+        assert!(Messages::from_u8(10).is_err());
+        assert!(Messages::from_u8(255).is_err());
+    }
+
+    #[test]
+    fn test_from_u8_error_message() {
+        // Verify the error message is descriptive
+        let result = Messages::from_u8(42);
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("Invalid message type"));
+        assert!(err_msg.contains("42"));
+    }
+}

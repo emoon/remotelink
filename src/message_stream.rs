@@ -1,5 +1,5 @@
 use crate::messages::Messages;
-use anyhow::*;
+use anyhow::{bail, Context, Result};
 use core::result::Result::Ok;
 use log::trace;
 use serde::ser::Serialize;
@@ -260,7 +260,8 @@ impl MessageStream {
             assert!(size < 0xffff_ffff_ffff);
             // TODO: Optimize
             self.data.resize(size as _, 0xff);
-            self.message = unsafe { std::mem::transmute(msg_type) };
+            self.message = Messages::from_u8(msg_type)
+                .context("Failed to parse message type from header")?;
             self.state = State::ReadData;
         }
 
