@@ -4,7 +4,7 @@ use crate::messages::*;
 use crate::options::*;
 use anyhow::{anyhow, Context as AnyhowContext, Result};
 use core::result::Result::Ok;
-use log::{trace, error, info};
+use log::{trace, error, info, warn, debug};
 use std::{
     fs::File,
     io::{Read, Write},
@@ -35,6 +35,68 @@ struct Context {
 }
 
 impl Context {
+    /// Clean up all resources associated with this context
+    fn cleanup(&mut self) {
+        trace!("Starting cleanup");
+
+        // Kill and reap the process if still running
+        if let Some(mut proc) = self.proc.take() {
+            match proc.try_wait() {
+                Ok(Some(status)) => {
+                    info!("Process already exited with status: {}", status);
+                }
+                Ok(None) => {
+                    // Process still running, kill it
+                    warn!("Process still running during cleanup, killing...");
+                    if let Err(e) = proc.kill() {
+                        error!("Failed to kill process: {}", e);
+                    }
+                    // Wait to reap zombie
+                    match proc.wait() {
+                        Ok(status) => info!("Process killed, exit status: {}", status),
+                        Err(e) => error!("Failed to wait on killed process: {}", e),
+                    }
+                }
+                Err(e) => {
+                    error!("Error checking process status: {}", e);
+                    // Try to kill anyway
+                    let _ = proc.kill();
+                    let _ = proc.wait();
+                }
+            }
+        }
+
+        // Close stdout/stderr channels
+        if self.stdout.take().is_some() {
+            trace!("Closed stdout channel");
+        }
+        if self.stderr.take().is_some() {
+            trace!("Closed stderr channel");
+        }
+
+        // Delete temporary executable file
+        if let Some(path) = self.temp_exe_path.take() {
+            match std::fs::remove_file(&path) {
+                Ok(()) => info!("Cleaned up temp file: {:?}", path),
+                Err(e) => error!("Failed to remove temp file {:?}: {}", path, e),
+            }
+        }
+
+        trace!("Cleanup complete");
+    }
+
+    /// Log current resource status for debugging
+    #[allow(dead_code)]
+    fn log_resource_status(&self) {
+        debug!(
+            "Context resources - Process: {}, Stdout: {}, Stderr: {}, Temp file: {}",
+            self.proc.is_some(),
+            self.stdout.is_some(),
+            self.stderr.is_some(),
+            self.temp_exe_path.is_some()
+        );
+    }
+
     /// Handles incoming messages and sends back reply (if needed) if returns false it means we
     /// should exit the update
     pub fn handle_incoming_msg<S: Write + Read>(
@@ -73,12 +135,33 @@ impl Context {
             }
 
             Messages::StopExecutableRequest => {
-                trace!("StopExecutableRequest");
+                info!("Received stop request");
 
-                if let Some(proc) = self.proc.as_mut() {
-                    proc.kill()?;
-                }
+                if let Some(mut proc) = self.proc.take() {
+                    match proc.kill() {
+                        Ok(()) => {
+                            // Wait to reap the process
+                            match proc.wait() {
+                                Ok(status) => {
+                                    info!("Process stopped, exit status: {}", status);
+                                }
+                                Err(e) => {
+                                    error!("Failed to wait on stopped process: {}", e);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to kill process: {}", e);
+                        }
+                    }
+                } else {
+                    warn!("Stop request but no process running");
+                };
 
+                // Clean up all resources
+                self.cleanup();
+
+                // Send reply
                 let stop_reply = StopExecutableReply::default();
 
                 msg_stream.begin_write_message(
@@ -253,6 +336,14 @@ impl Context {
     }
 }
 
+impl Drop for Context {
+    fn drop(&mut self) {
+        // Ensure cleanup happens even if not explicitly called
+        // This handles cases where the connection drops or errors occur
+        self.cleanup();
+    }
+}
+
 fn handle_client(stream: &mut TcpStream, opts: &Opt) -> Result<()> {
     let peer_addr = stream.peer_addr()
         .unwrap_or_else(|_| "unknown:0".parse().unwrap());
@@ -305,6 +396,43 @@ fn handle_client(stream: &mut TcpStream, opts: &Opt) -> Result<()> {
         } else {
             // If there isn't much going on we sleep for 1 ms to not hammer the CPU
             std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+
+        // Check if process has exited
+        if let Some(proc) = context.proc.as_mut() {
+            match proc.try_wait() {
+                Ok(Some(exit_status)) => {
+                    let exit_code = exit_status.code().unwrap_or(-1);
+                    info!("Process exited with code: {}", exit_code);
+
+                    // Send exit notification to client
+                    let exit_message = messages::LaunchExecutableReply {
+                        launch_status: exit_code,
+                        error_info: None,
+                    };
+
+                    msg_stream.begin_write_message(
+                        stream,
+                        &exit_message,
+                        Messages::LaunchExecutableReply,
+                        TransitionToRead::Yes,
+                    )?;
+
+                    // Clean up resources
+                    context.cleanup();
+
+                    // Continue accepting commands (or could return Ok(()) to close connection)
+                }
+                Ok(None) => {
+                    // Process still running, continue
+                }
+                Err(e) => {
+                    error!("Error checking process status: {}", e);
+                    // Clean up on error
+                    context.cleanup();
+                    return Err(e.into());
+                }
+            }
         }
     }
 }
