@@ -31,4 +31,7 @@ pub struct Opt {
     #[arg(long, default_value = "60")]
     /// TCP keepalive interval in seconds
     pub keepalive_secs: u64,
+    #[arg(long, default_value = "10")]
+    /// Maximum number of simultaneous connections
+    pub max_connections: usize,
 }

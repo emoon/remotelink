@@ -11,7 +11,11 @@ use std::{
     net::{TcpListener, TcpStream},
     path::PathBuf,
     process::{Child, Command, Stdio},
-    sync::mpsc::{Receiver, Sender, channel},
+    sync::{
+        mpsc::{Receiver, Sender, channel},
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
     thread,
     time::Duration,
 };
@@ -246,10 +250,11 @@ impl Context {
     where
         R: Read + Send + 'static,
     {
+        const IO_BUFFER_SIZE: usize = 4096;  // Standard page size for optimal performance
         if let Err(e) = thread::Builder::new()
             .name("child_stream_to_vec".into())
             .spawn(move || loop {
-                let mut buf = [0u8; 2];
+                let mut buf = [0u8; IO_BUFFER_SIZE];
                 match stream.read(&mut buf) {
                     Err(err) => {
                         error!("{}] Error reading from stream: {}", line!(), err);
@@ -481,15 +486,57 @@ fn handle_client(stream: &mut TcpStream, opts: &Opt) -> Result<()> {
 pub fn update(opts: &Opt) -> Result<()> {
     let listener = TcpListener::bind("0.0.0.0:8888")
         .with_context(|| "Failed to bind to 0.0.0.0:8888")?;
+
+    let active_connections = Arc::new(AtomicUsize::new(0));
+    let max_connections = opts.max_connections;
+
     info!("Waiting for incoming host connection");
+    info!("Connection limit set to {}", max_connections);
+
     for stream in listener.incoming() {
         match stream {
-            Err(e) => error!("Failed to accept incoming connection: {}", e),
             Ok(mut stream) => {
+                // Check connection limit
+                let current_connections = active_connections.load(Ordering::SeqCst);
+
+                if current_connections >= max_connections {
+                    warn!(
+                        "Connection limit reached ({}/{}), rejecting connection from {:?}",
+                        current_connections,
+                        max_connections,
+                        stream.peer_addr()
+                    );
+                    // Connection will be dropped, closing it
+                    continue;
+                }
+
+                // Accept connection
+                let peer_addr = stream.peer_addr()
+                    .unwrap_or_else(|_| "unknown:0".parse().unwrap());
+
+                // Increment counter
+                active_connections.fetch_add(1, Ordering::SeqCst);
+                let current = active_connections.load(Ordering::SeqCst);
+                info!("Connection accepted from {} ({}/{} active)",
+                      peer_addr, current, max_connections);
+
+                // Clone counter for thread
+                let conn_counter = Arc::clone(&active_connections);
                 let opts_clone = opts.clone();
+
+                // Spawn handler thread
                 thread::spawn(move || {
-                    handle_client(&mut stream, &opts_clone).unwrap_or_else(|error| error!("{:?}", error));
+                    if let Err(e) = handle_client(&mut stream, &opts_clone) {
+                        error!("Client handler error for {}: {}", peer_addr, e);
+                    }
+
+                    // Decrement counter when done
+                    let remaining = conn_counter.fetch_sub(1, Ordering::SeqCst) - 1;
+                    info!("Connection closed for {} ({} active)", peer_addr, remaining);
                 });
+            }
+            Err(e) => {
+                error!("Failed to accept connection: {}", e);
             }
         }
     }
