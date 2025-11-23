@@ -110,11 +110,7 @@ fn test_connection_limit() -> Result<()> {
     let port = common::find_available_port();
 
     // Start server with low connection limit
-    let server = Command::new("cargo")
-        .arg("run")
-        .arg("--bin")
-        .arg("remotelink")
-        .arg("--")
+    let server = Command::new(common::get_remotelink_binary())
         .arg("--remote-runner")
         .arg("--port")
         .arg(port.to_string())

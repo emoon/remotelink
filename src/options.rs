@@ -40,4 +40,7 @@ pub struct Opt {
     #[arg(short, long)]
     /// Watch the executable file for changes and automatically restart when modified
     pub watch: bool,
+    #[arg(long)]
+    /// Directory to serve files from (enables file server on port 8889)
+    pub file_dir: Option<String>,
 }

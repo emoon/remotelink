@@ -304,10 +304,40 @@ impl Context {
                 .with_context(|| format!("Failed to set executable permissions on {:?}", exe_path))?;
         }
 
+        // Build command with environment variables
+        let mut cmd = Command::new(&exe_path);
+        cmd.stderr(Stdio::piped()).stdout(Stdio::piped());
+
+        // Set REMOTELINK_FILE_SERVER and LD_PRELOAD environment variables if file server is enabled
+        if f.file_server {
+            // Get the host address from the environment or use localhost
+            // The host will be running the file server on port 8889
+            let file_server_addr = std::env::var("REMOTELINK_HOST")
+                .unwrap_or_else(|_| "127.0.0.1".to_string());
+            let file_server = format!("{}:8889", file_server_addr);
+            cmd.env("REMOTELINK_FILE_SERVER", &file_server);
+            info!("Setting REMOTELINK_FILE_SERVER={}", file_server);
+
+            // Set LD_PRELOAD to enable file interception
+            // Try common locations for the preload library
+            let preload_paths = vec![
+                "/usr/local/lib/libremotelink_preload.so",
+                "/usr/lib/libremotelink_preload.so",
+                "./target/release/libremotelink_preload.so",
+                "./target/debug/libremotelink_preload.so",
+            ];
+
+            for path in &preload_paths {
+                if std::path::Path::new(path).exists() {
+                    cmd.env("LD_PRELOAD", path);
+                    info!("Setting LD_PRELOAD={}", path);
+                    break;
+                }
+            }
+        }
+
         // Spawn the executable
-        let mut p = Command::new(&exe_path)
-            .stderr(Stdio::piped())
-            .stdout(Stdio::piped())
+        let mut p = cmd
             .spawn()
             .with_context(|| format!("Failed to spawn executable: {:?}", exe_path))?;
 

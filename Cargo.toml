@@ -1,3 +1,6 @@
+[workspace]
+members = [".", "remotelink_client", "remotelink_preload"]
+
 [package]
 name = "remotelink"
 version = "0.1.0"
@@ -19,3 +22,8 @@ simple_logger = "5.0"
 notify-debouncer-mini = "0.4"
 libc = "0.2"
 uuid = { version = "1.0", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3.8"
+remotelink_client = { path = "remotelink_client" }
+serial_test = "3.0"
