@@ -1,9 +1,10 @@
 use anyhow::{anyhow, Context, Result};
-use log::trace;
+use log::{info, trace};
 use std::fs::File;
 use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::net::{SocketAddr, TcpStream};
 use std::sync::mpsc::channel;
+use std::time::Duration;
 
 use crate::message_stream::{MessageStream, TransitionToRead};
 use crate::messages::*;
@@ -140,9 +141,24 @@ fn close_down_exe<S: Write + Read>(msg_stream: &mut MessageStream, stream: &mut 
 
 pub fn host_loop(opts: &Opt, ip_address: &str) -> Result<()> {
     let ip_adress: std::net::IpAddr = ip_address.parse()?;
-    let address = std::net::SocketAddr::new(ip_adress, opts.port);
+    let address = SocketAddr::new(ip_adress, opts.port);
 
-    let mut stream = TcpStream::connect(address)?;
+    info!("Connecting to {} with timeout of {}s", address, opts.connect_timeout_secs);
+
+    let mut stream = TcpStream::connect_timeout(
+        &address,
+        Duration::from_secs(opts.connect_timeout_secs)
+    ).context("Failed to connect to remote runner")?;
+
+    info!("Connected to {}", address);
+
+    // Configure timeouts before handshake
+    crate::configure_stream_timeouts(
+        &mut stream,
+        Duration::from_secs(opts.read_timeout_secs),
+        Duration::from_secs(opts.write_timeout_secs),
+        Duration::from_secs(opts.keepalive_secs),
+    ).context("Failed to configure stream timeouts")?;
 
     handshake(&mut stream)?;
 

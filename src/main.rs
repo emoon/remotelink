@@ -7,9 +7,54 @@ mod tests;
 use clap::Parser;
 
 use crate::options::Opt;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use log::LevelFilter;
 use simple_logger::SimpleLogger;
+use std::net::TcpStream;
+use std::time::Duration;
+
+/// Configure timeouts and TCP options on a stream
+pub fn configure_stream_timeouts(
+    stream: &mut TcpStream,
+    read_timeout: Duration,
+    write_timeout: Duration,
+    _keepalive: Duration,
+) -> Result<()> {
+    stream.set_read_timeout(Some(read_timeout))
+        .context("Failed to set read timeout")?;
+
+    stream.set_write_timeout(Some(write_timeout))
+        .context("Failed to set write timeout")?;
+
+    // Note: TCP keepalive is a socket option that requires platform-specific APIs.
+    // On Unix systems, it's set via setsockopt with SO_KEEPALIVE.
+    // For cross-platform support, we use the socket2 crate approach.
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsRawFd;
+        let fd = stream.as_raw_fd();
+        // Enable TCP keepalive
+        unsafe {
+            let optval: libc::c_int = 1;
+            if libc::setsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_KEEPALIVE,
+                &optval as *const _ as *const libc::c_void,
+                std::mem::size_of_val(&optval) as libc::socklen_t,
+            ) < 0 {
+                return Err(std::io::Error::last_os_error())
+                    .context("Failed to set SO_KEEPALIVE");
+            }
+        }
+    }
+
+    // Disable Nagle's algorithm for lower latency
+    stream.set_nodelay(true)
+        .context("Failed to set TCP_NODELAY")?;
+
+    Ok(())
+}
 
 fn main() -> Result<()> {
     let opt = Opt::parse();

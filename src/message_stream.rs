@@ -1,7 +1,7 @@
 use crate::messages::Messages;
 use anyhow::{bail, Context, Result};
 use core::result::Result::Ok;
-use log::trace;
+use log::{trace, warn};
 use serde::ser::Serialize;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::Hasher;
@@ -174,10 +174,13 @@ impl MessageStream {
         match stream.write(data) {
             Ok(n) => Ok(n),
             Err(err) => {
-                if err.kind() == std::io::ErrorKind::WouldBlock {
-                    Ok(0)
-                } else {
-                    bail!(err);
+                match err.kind() {
+                    std::io::ErrorKind::WouldBlock => Ok(0),
+                    std::io::ErrorKind::TimedOut => {
+                        warn!("Write timeout occurred");
+                        bail!("Write timeout");
+                    }
+                    _ => bail!(err),
                 }
             }
         }
@@ -188,10 +191,13 @@ impl MessageStream {
         match stream.read(data) {
             Ok(n) => Ok(n),
             Err(err) => {
-                if err.kind() == std::io::ErrorKind::WouldBlock {
-                    Ok(0)
-                } else {
-                    bail!(err);
+                match err.kind() {
+                    std::io::ErrorKind::WouldBlock => Ok(0),
+                    std::io::ErrorKind::TimedOut => {
+                        warn!("Read timeout occurred");
+                        bail!("Read timeout");
+                    }
+                    _ => bail!(err),
                 }
             }
         }

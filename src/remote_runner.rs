@@ -13,6 +13,7 @@ use std::{
     process::{Child, Command, Stdio},
     sync::mpsc::{Receiver, Sender, channel},
     thread,
+    time::Duration,
 };
 
 type IoOut = Receiver<Vec<u8>>;
@@ -221,8 +222,22 @@ impl Context {
     }
 }
 
-fn handle_client(stream: &mut TcpStream) -> Result<()> {
-    info!("Incoming connection from: {}", stream.peer_addr()?);
+fn handle_client(stream: &mut TcpStream, opts: &Opt) -> Result<()> {
+    let peer_addr = stream.peer_addr()
+        .unwrap_or_else(|_| "unknown:0".parse().unwrap());
+
+    info!("Incoming connection from: {}", peer_addr);
+
+    // Configure timeouts before any operations
+    if let Err(e) = crate::configure_stream_timeouts(
+        stream,
+        Duration::from_secs(opts.read_timeout_secs),
+        Duration::from_secs(opts.write_timeout_secs),
+        Duration::from_secs(opts.keepalive_secs),
+    ) {
+        error!("Failed to configure stream timeouts for {}: {}", peer_addr, e);
+        return Err(e);
+    }
 
     stream.set_nonblocking(true)?;
 
@@ -263,7 +278,7 @@ fn handle_client(stream: &mut TcpStream) -> Result<()> {
     }
 }
 
-pub fn update(_opts: &Opt) -> Result<()> {
+pub fn update(opts: &Opt) -> Result<()> {
     let listener = TcpListener::bind("0.0.0.0:8888")
         .with_context(|| "Failed to bind to 0.0.0.0:8888")?;
     info!("Waiting for incoming host connection");
@@ -271,8 +286,9 @@ pub fn update(_opts: &Opt) -> Result<()> {
         match stream {
             Err(e) => error!("Failed to accept incoming connection: {}", e),
             Ok(mut stream) => {
+                let opts_clone = opts.clone();
                 thread::spawn(move || {
-                    handle_client(&mut stream).unwrap_or_else(|error| error!("{:?}", error));
+                    handle_client(&mut stream, &opts_clone).unwrap_or_else(|error| error!("{:?}", error));
                 });
             }
         }
