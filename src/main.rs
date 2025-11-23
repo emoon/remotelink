@@ -30,10 +30,12 @@ fn main() -> Result<()> {
 
     if opt.remote_runner {
         println!("Starting remote-runner");
-        remote_runner::update(&opt);
+        remote_runner::update(&opt)?;
     } else {
         println!("Starting host");
-        host::host_loop(&opt, opt.target.as_ref().unwrap())?;
+        let target = opt.target.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Target IP address is required when not in remote-runner mode"))?;
+        host::host_loop(&opt, target)?;
     }
 
     Ok(())

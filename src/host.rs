@@ -1,4 +1,4 @@
-use anyhow::*;
+use anyhow::{anyhow, Context, Result};
 use log::trace;
 use std::fs::File;
 use std::io::{Read, Write};
@@ -160,13 +160,19 @@ pub fn host_loop(opts: &Opt, ip_address: &str) -> Result<()> {
     // setup ctrl-c handler
     let (tx, rx) = channel();
 
-    ctrlc::set_handler(move || tx.send(()).expect("Could not send signal on channel."))
-        .expect("Error setting Ctrl-C handler");
+    ctrlc::set_handler(move || {
+        if let Err(e) = tx.send(()) {
+            log::error!("Failed to send Ctrl-C signal: {}", e);
+        }
+    })
+    .context("Failed to set Ctrl-C handler")?;
 
     //
     loop {
-        if let Some(msg) = msg_stream.update(&mut stream).unwrap() {
-            handle_incoming_msg(&mut msg_stream, &mut stream, msg).unwrap();
+        if let Some(msg) = msg_stream.update(&mut stream)
+            .context("Failed to update message stream")? {
+            handle_incoming_msg(&mut msg_stream, &mut stream, msg)
+                .context("Failed to handle incoming message")?;
         }
 
         if rx.try_recv().is_ok() {

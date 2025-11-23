@@ -2,7 +2,7 @@ use crate::message_stream::{MessageStream, TransitionToRead};
 use crate::messages;
 use crate::messages::*;
 use crate::options::*;
-use anyhow::*;
+use anyhow::{anyhow, Context as AnyhowContext, Result};
 use core::result::Result::Ok;
 use log::{trace, error, info};
 use std::{
@@ -92,11 +92,44 @@ impl Context {
 
                 match file {
                     Ok(f) => {
-                        self.start_executable(&f);
+                        match self.start_executable(&f) {
+                            Ok(()) => {
+                                let exe_launch = LaunchExecutableReply {
+                                    launch_status: 0,
+                                    error_info: None,
+                                };
+
+                                msg_stream.begin_write_message(
+                                    stream,
+                                    &exe_launch,
+                                    Messages::LaunchExecutableReply,
+                                    TransitionToRead::Yes,
+                                )?;
+                            }
+                            Err(e) => {
+                                error!("Failed to start executable: {}", e);
+
+                                let exe_launch = LaunchExecutableReply {
+                                    launch_status: -1,
+                                    error_info: Some("Failed to launch executable"),
+                                };
+
+                                msg_stream.begin_write_message(
+                                    stream,
+                                    &exe_launch,
+                                    Messages::LaunchExecutableReply,
+                                    TransitionToRead::Yes,
+                                )?;
+                            }
+                        }
+                    }
+
+                    Err(e) => {
+                        error!("Failed to deserialize LaunchExecutableRequest: {}", e);
 
                         let exe_launch = LaunchExecutableReply {
-                            launch_status: 0,
-                            error_info: None,
+                            launch_status: -1,
+                            error_info: Some("Invalid message format"),
                         };
 
                         msg_stream.begin_write_message(
@@ -105,10 +138,6 @@ impl Context {
                             Messages::LaunchExecutableReply,
                             TransitionToRead::Yes,
                         )?;
-                    }
-
-                    Err(e) => {
-                        panic!("{}", e);
                     }
                 }
             }
@@ -127,7 +156,7 @@ impl Context {
     where
         R: Read + Send + 'static,
     {
-        thread::Builder::new()
+        if let Err(e) = thread::Builder::new()
             .name("child_stream_to_vec".into())
             .spawn(move || loop {
                 let mut buf = [0u8; 2];
@@ -148,35 +177,47 @@ impl Context {
                     }
                 }
             })
-            .expect("!thread");
+        {
+            error!("Failed to spawn child_stream_to_vec thread: {}", e);
+        }
     }
 
-    fn start_executable(&mut self, f: &messages::LaunchExecutableRequest) {
+    fn start_executable(&mut self, f: &messages::LaunchExecutableRequest) -> Result<()> {
         trace!("Want to launch {} size {}", f.path, f.data.len());
 
         {
-            let mut file = File::create("test").unwrap();
-            file.write_all(f.data).unwrap();
+            let mut file = File::create("test")
+                .with_context(|| "Failed to create executable file")?;
+            file.write_all(f.data)
+                .with_context(|| "Failed to write executable data")?;
         }
 
         // make exe executable
-        std::fs::set_permissions("test", std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::set_permissions("test", std::fs::Permissions::from_mode(0o700))
+            .with_context(|| "Failed to set executable permissions")?;
 
         let mut p = Command::new("./test")
             .stderr(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()
-            .expect("failed to execute child");
+            .with_context(|| "Failed to spawn executable process")?;
 
         let (stdout_tx, stdout_rx) = channel();
         let (stderr_tx, stderr_rx) = channel();
 
-        Self::child_stream_to_vec(p.stdout.take().expect("!stdout"), stdout_tx);
-        Self::child_stream_to_vec(p.stderr.take().expect("!stderr"), stderr_tx);
+        let stdout = p.stdout.take()
+            .ok_or_else(|| anyhow::anyhow!("Failed to capture stdout"))?;
+        let stderr = p.stderr.take()
+            .ok_or_else(|| anyhow::anyhow!("Failed to capture stderr"))?;
 
-        self.stdout = Some(stdout_rx); 
-        self.stderr = Some(stderr_rx); 
+        Self::child_stream_to_vec(stdout, stdout_tx);
+        Self::child_stream_to_vec(stderr, stderr_tx);
+
+        self.stdout = Some(stdout_rx);
+        self.stderr = Some(stderr_rx);
         self.proc = Some(p);
+
+        Ok(())
     }
 }
 
@@ -222,12 +263,13 @@ fn handle_client(stream: &mut TcpStream) -> Result<()> {
     }
 }
 
-pub fn update(_opts: &Opt) {
-    let listener = TcpListener::bind("0.0.0.0:8888").expect("Could not bind");
-    info!("Wating incoming host");
+pub fn update(_opts: &Opt) -> Result<()> {
+    let listener = TcpListener::bind("0.0.0.0:8888")
+        .with_context(|| "Failed to bind to 0.0.0.0:8888")?;
+    info!("Waiting for incoming host connection");
     for stream in listener.incoming() {
         match stream {
-            Err(e) => error!("failed: {}", e),
+            Err(e) => error!("Failed to accept incoming connection: {}", e),
             Ok(mut stream) => {
                 thread::spawn(move || {
                     handle_client(&mut stream).unwrap_or_else(|error| error!("{:?}", error));
@@ -235,4 +277,5 @@ pub fn update(_opts: &Opt) {
             }
         }
     }
+    Ok(())
 }
