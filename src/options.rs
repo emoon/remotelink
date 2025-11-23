@@ -34,4 +34,7 @@ pub struct Opt {
     #[arg(long, default_value = "10")]
     /// Maximum number of simultaneous connections
     pub max_connections: usize,
+    #[arg(long, default_value = "127.0.0.1")]
+    /// Bind address for remote runner (default: 127.0.0.1 for security)
+    pub bind_address: String,
 }

@@ -484,8 +484,17 @@ fn handle_client(stream: &mut TcpStream, opts: &Opt) -> Result<()> {
 }
 
 pub fn update(opts: &Opt) -> Result<()> {
-    let listener = TcpListener::bind("0.0.0.0:8888")
-        .with_context(|| "Failed to bind to 0.0.0.0:8888")?;
+    let bind_addr = format!("{}:{}", opts.bind_address, opts.port);
+    let listener = TcpListener::bind(&bind_addr)
+        .with_context(|| format!("Failed to bind to {}", bind_addr))?;
+
+    info!("Remote runner listening on {}", bind_addr);
+
+    // Warn if binding to all interfaces
+    if opts.bind_address == "0.0.0.0" {
+        warn!("Binding to 0.0.0.0 - accessible from all network interfaces!");
+        warn!("Consider using 127.0.0.1 for local-only access");
+    }
 
     let active_connections = Arc::new(AtomicUsize::new(0));
     let max_connections = opts.max_connections;
