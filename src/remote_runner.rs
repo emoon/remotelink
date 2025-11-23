@@ -188,17 +188,9 @@ impl Context {
                     Ok(f) => {
                         match self.start_executable(&f) {
                             Ok(()) => {
-                                let exe_launch = LaunchExecutableReply {
-                                    launch_status: 0,
-                                    error_info: None,
-                                };
-
-                                msg_stream.begin_write_message(
-                                    stream,
-                                    &exe_launch,
-                                    Messages::LaunchExecutableReply,
-                                    TransitionToRead::Yes,
-                                )?;
+                                // Launch successful - don't send reply yet
+                                // Will send LaunchExecutableReply when process exits
+                                trace!("Executable launched successfully");
                             }
                             Err(e) => {
                                 error!("Failed to start executable: {}", e);

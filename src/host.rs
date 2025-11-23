@@ -54,11 +54,12 @@ fn handshake<T: Write + Read>(stream: &mut T) -> Result<()> {
 }
 
 /// Handles incoming messages and sends back reply (if needed)
+/// Returns Ok(true) to continue, Ok(false) to exit
 fn handle_incoming_msg<S: Write + Read>(
     msg_stream: &mut MessageStream,
     stream: &mut S,
     message: Messages,
-) -> Result<()> {
+) -> Result<bool> {
     trace!("Message received: {:?}", message);
 
     match message {
@@ -77,7 +78,16 @@ fn handle_incoming_msg<S: Write + Read>(
         }
 
         Messages::LaunchExecutableReply => {
-            // TODO: Verify that the executable launched correct
+            let reply: LaunchExecutableReply = bincode::deserialize(&msg_stream.data)?;
+            if reply.launch_status != 0 {
+                if let Some(error) = reply.error_info {
+                    log::error!("Executable failed: {}", error);
+                }
+                log::error!("Process exited with status: {}", reply.launch_status);
+                return Ok(false);
+            }
+            trace!("Process finished with status: {}", reply.launch_status);
+            return Ok(false);
         }
 
         _ => (),
@@ -86,7 +96,7 @@ fn handle_incoming_msg<S: Write + Read>(
     trace!("Message handled, begin read again");
     msg_stream.begin_read(stream, false)?;
 
-    Ok(())
+    Ok(true)
 }
 
 fn send_file<S: Write + Read>(
@@ -190,8 +200,11 @@ pub fn host_loop(opts: &Opt, ip_address: &str) -> Result<()> {
     loop {
         if let Some(msg) = msg_stream.update(&mut stream)
             .context("Failed to update message stream")? {
-            handle_incoming_msg(&mut msg_stream, &mut stream, msg)
-                .context("Failed to handle incoming message")?;
+            if !handle_incoming_msg(&mut msg_stream, &mut stream, msg)
+                .context("Failed to handle incoming message")? {
+                info!("Remote execution completed");
+                return Ok(());
+            }
         }
 
         if rx.try_recv().is_ok() {

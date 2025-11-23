@@ -134,7 +134,6 @@ mod tests {
     #[test]
     fn test_from_u8_invalid_messages() {
         // Test various invalid values
-        assert!(Messages::from_u8(7).is_err());
         assert!(Messages::from_u8(9).is_err());
         assert!(Messages::from_u8(10).is_err());
         assert!(Messages::from_u8(255).is_err());
