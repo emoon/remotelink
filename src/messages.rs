@@ -3,7 +3,6 @@ use serde::{Deserialize, Serialize};
 pub const REMOTELINK_MAJOR_VERSION: u8 = 0;
 pub const REMOTELINK_MINOR_VERSION: u8 = 1;
 
-/// Used for read/write over the stream
 //const CHUNK_SIZE: usize = 64 * 1024;
 
 #[repr(u8)]
@@ -59,6 +58,7 @@ pub struct StopExecutableReply {
     dummy: u32,
 }
 
+#[allow(dead_code)]
 #[derive(Copy, Clone)]
 pub struct Header {
     pub msg_type: Messages,
