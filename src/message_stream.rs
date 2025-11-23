@@ -48,8 +48,8 @@ pub struct MessageStream {
     pub data: Vec<u8>,
 }
 
-impl MessageStream {
-    pub fn new() -> MessageStream {
+impl Default for MessageStream {
+    fn default() -> Self {
         MessageStream {
             transition_to_read: TransitionToRead::No,
             state: State::Complete,
@@ -59,6 +59,12 @@ impl MessageStream {
             header: [0; 8],
             data: Vec::new(),
         }
+    }
+}
+
+impl MessageStream {
+    pub fn new() -> MessageStream {
+        Self::default()
     }
 
     /// Update the state machine. Will return a Some(Message) when a read request has finished.
