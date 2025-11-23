@@ -84,10 +84,20 @@ fn handle_incoming_msg<S: Write + Read>(
 
         Messages::LaunchExecutableReply => {
             let reply: LaunchExecutableReply = bincode::deserialize(&msg_stream.data)?;
-            if reply.launch_status != 0 {
+
+            // Check if this is a launch failure (status -1 with error_info)
+            let is_launch_failure = reply.launch_status == -1 && reply.error_info.is_some();
+
+            if is_launch_failure {
+                // Launch failure - exit regardless of watch mode
                 if let Some(error) = reply.error_info {
-                    log::error!("Executable failed: {}", error);
+                    log::error!("Failed to launch executable: {}", error);
                 }
+                return Ok(None); // Exit host loop
+            }
+
+            // Normal process exit
+            if reply.launch_status != 0 {
                 log::error!("Process exited with status: {}", reply.launch_status);
             } else {
                 trace!("Process finished with status: {}", reply.launch_status);
