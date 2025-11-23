@@ -16,6 +16,7 @@ pub enum Messages {
     StopExecutableRequest = 4,
     StopExecutableReply = 5,
     StdoutOutput = 6,
+    StderrOutput = 7,
     NoMessage = 8,
 }
 
@@ -31,6 +32,7 @@ impl Messages {
             4 => Ok(Messages::StopExecutableRequest),
             5 => Ok(Messages::StopExecutableReply),
             6 => Ok(Messages::StdoutOutput),
+            7 => Ok(Messages::StderrOutput),
             8 => Ok(Messages::NoMessage),
             _ => Err(anyhow!("Invalid message type: {}", value)),
         }
@@ -125,6 +127,7 @@ mod tests {
         assert!(matches!(Messages::from_u8(4).unwrap(), Messages::StopExecutableRequest));
         assert!(matches!(Messages::from_u8(5).unwrap(), Messages::StopExecutableReply));
         assert!(matches!(Messages::from_u8(6).unwrap(), Messages::StdoutOutput));
+        assert!(matches!(Messages::from_u8(7).unwrap(), Messages::StderrOutput));
         assert!(matches!(Messages::from_u8(8).unwrap(), Messages::NoMessage));
     }
 

@@ -336,6 +336,56 @@ impl Context {
     }
 }
 
+/// Generic helper to send data from a receiver if available
+fn send_output<S: Write + Read>(
+    receiver: Option<&mut IoOut>,
+    msg_stream: &mut MessageStream,
+    stream: &mut S,
+    message_type: Messages,
+) -> Result<()> {
+    let receiver = match receiver {
+        Some(r) => r,
+        None => return Ok(()),
+    };
+
+    let data = match receiver.try_recv() {
+        Ok(data) => data,
+        Err(_) => return Ok(()),
+    };
+
+    if data.is_empty() {
+        return Ok(());
+    }
+
+    let text_message = TextMessage { data: &data };
+    msg_stream.begin_write_message(
+        stream,
+        &text_message,
+        message_type,
+        TransitionToRead::Yes,
+    )?;
+
+    Ok(())
+}
+
+/// Helper to send stdout data if available
+fn send_stdout<S: Write + Read>(
+    context: &mut Context,
+    msg_stream: &mut MessageStream,
+    stream: &mut S,
+) -> Result<()> {
+    send_output(context.stdout.as_mut(), msg_stream, stream, Messages::StdoutOutput)
+}
+
+/// Helper to send stderr data if available
+fn send_stderr<S: Write + Read>(
+    context: &mut Context,
+    msg_stream: &mut MessageStream,
+    stream: &mut S,
+) -> Result<()> {
+    send_output(context.stderr.as_mut(), msg_stream, stream, Messages::StderrOutput)
+}
+
 impl Drop for Context {
     fn drop(&mut self) {
         // Ensure cleanup happens even if not explicitly called
@@ -380,21 +430,12 @@ fn handle_client(stream: &mut TcpStream, opts: &Opt) -> Result<()> {
             }
         }
 
-        if let Some(stdout) = context.stdout.as_mut() {
-            if let Ok(data) = stdout.try_recv() {
-                if !data.is_empty() {
-                    let text_message = TextMessage { data: &data };
+        // Send stdout and stderr data if available
+        send_stdout(&mut context, &mut msg_stream, stream)?;
+        send_stderr(&mut context, &mut msg_stream, stream)?;
 
-                    msg_stream.begin_write_message(
-                        stream,
-                        &text_message,
-                        Messages::StdoutOutput,
-                        TransitionToRead::Yes,
-                    )?;
-                }
-            }
-        } else {
-            // If there isn't much going on we sleep for 1 ms to not hammer the CPU
+        // If there isn't much going on we sleep for 1 ms to not hammer the CPU
+        if context.stdout.is_none() && context.stderr.is_none() {
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
 

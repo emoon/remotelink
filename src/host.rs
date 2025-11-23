@@ -66,15 +66,18 @@ fn handle_incoming_msg<S: Write + Read>(
             let msg: TextMessage = bincode::deserialize(&msg_stream.data)?;
             let text = std::str::from_utf8(msg.data)?;
             print!("{}", text);
+            std::io::stdout().flush()?;
+        }
 
-            // make sure stream starts reading again
-            //msg_stream.begin_read(stream, true)?;
+        Messages::StderrOutput => {
+            let msg: TextMessage = bincode::deserialize(&msg_stream.data)?;
+            let text = std::str::from_utf8(msg.data)?;
+            eprint!("{}", text);
+            std::io::stderr().flush()?;
         }
 
         Messages::LaunchExecutableReply => {
             // TODO: Verify that the executable launched correct
-            // make sure stream starts reading again
-            //msg_stream.begin_read(stream, true)?;
         }
 
         _ => (),
