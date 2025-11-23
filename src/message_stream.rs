@@ -1,11 +1,15 @@
 use crate::messages::Messages;
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use core::result::Result::Ok;
 use log::{trace, warn};
 use serde::ser::Serialize;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::Hasher;
 use std::io::{Read, Write};
+
+/// Maximum message size: 500MB
+/// This prevents OOM from corrupted headers or malicious messages
+const MAX_MESSAGE_SIZE: u64 = 500 * 1024 * 1024;
 
 /// These are all the states that is needed to write to the output
 /// This supports writing it non-blocking fashion and can pickup where it left of.
@@ -263,9 +267,20 @@ impl MessageStream {
                 | ((self.header[6] as u64) << 8)
                 | (self.header[7] as u64);
 
-            assert!(size < 0xffff_ffff_ffff);
-            // TODO: Optimize
-            self.data.resize(size as _, 0xff);
+            if size > MAX_MESSAGE_SIZE {
+                return Err(anyhow!(
+                    "Message size {} exceeds maximum allowed {} (possible corruption or attack)",
+                    size,
+                    MAX_MESSAGE_SIZE
+                ));
+            }
+
+            // Log warning for large messages
+            if size > 100 * 1024 * 1024 {  // > 100MB
+                warn!("Large message size: {} bytes", size);
+            }
+
+            self.data.resize(size as usize, 0);
             self.message = Messages::from_u8(msg_type)
                 .context("Failed to parse message type from header")?;
             self.state = State::ReadData;
@@ -291,5 +306,64 @@ impl MessageStream {
         } else {
             Ok(None)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_message_size_limit() {
+        // Create header with oversized message (1TB)
+        let mut header = [0u8; 8];
+        header[0] = 0; // message type
+
+        // Set size to 1TB (exceeds 500MB limit)
+        let size: u64 = 1024 * 1024 * 1024 * 1024;
+        header[1] = ((size >> 48) & 0xFF) as u8;
+        header[2] = ((size >> 40) & 0xFF) as u8;
+        header[3] = ((size >> 32) & 0xFF) as u8;
+        header[4] = ((size >> 24) & 0xFF) as u8;
+        header[5] = ((size >> 16) & 0xFF) as u8;
+        header[6] = ((size >> 8) & 0xFF) as u8;
+        header[7] = (size & 0xFF) as u8;
+
+        let mut msg_stream = MessageStream::new();
+        msg_stream.header = header;
+        msg_stream.header_offset = 8;
+
+        // Create a mock stream that won't be used
+        let mut mock_stream = std::io::Cursor::new(Vec::new());
+
+        // Should fail to allocate
+        let result = msg_stream.read_header(&mut mock_stream);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("exceeds maximum"));
+    }
+
+    #[test]
+    fn test_reasonable_message_size() {
+        // Test that reasonable sizes (e.g., 10MB) work fine
+        let mut header = [0u8; 8];
+        header[0] = 0;
+
+        let size: u64 = 10 * 1024 * 1024; // 10MB
+        header[4] = ((size >> 24) & 0xFF) as u8;
+        header[5] = ((size >> 16) & 0xFF) as u8;
+        header[6] = ((size >> 8) & 0xFF) as u8;
+        header[7] = (size & 0xFF) as u8;
+
+        let mut msg_stream = MessageStream::new();
+        msg_stream.header = header;
+        msg_stream.header_offset = 8;
+
+        // Create a mock stream
+        let mut mock_stream = std::io::Cursor::new(Vec::new());
+
+        // This should succeed
+        let result = msg_stream.read_header(&mut mock_stream);
+        assert!(result.is_ok());
+        assert_eq!(msg_stream.data.len(), size as usize);
     }
 }

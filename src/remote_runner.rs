@@ -9,12 +9,16 @@ use std::{
     fs::File,
     io::{Read, Write},
     net::{TcpListener, TcpStream},
-    os::unix::fs::PermissionsExt,
+    path::PathBuf,
     process::{Child, Command, Stdio},
     sync::mpsc::{Receiver, Sender, channel},
     thread,
     time::Duration,
 };
+use uuid::Uuid;
+
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 
 type IoOut = Receiver<Vec<u8>>;
 
@@ -26,6 +30,8 @@ struct Context {
     stderr: Option<IoOut>,
     /// Used for tracking running executable.
     proc: Option<Child>,
+    /// Path to the temporary executable file for cleanup
+    temp_exe_path: Option<PathBuf>,
 }
 
 impl Context {
@@ -186,22 +192,46 @@ impl Context {
     fn start_executable(&mut self, f: &messages::LaunchExecutableRequest) -> Result<()> {
         trace!("Want to launch {} size {}", f.path, f.data.len());
 
+        // Generate unique temp file
+        let temp_dir = std::env::temp_dir();
+        let unique_name = format!("remotelink-{}", Uuid::new_v4());
+
+        #[cfg(unix)]
+        let exe_path = temp_dir.join(unique_name);
+
+        #[cfg(windows)]
+        let exe_path = temp_dir.join(format!("{}.exe", unique_name));
+
+        info!("Creating temp executable: {:?}", exe_path);
+
+        // Write executable data
+        let mut file = File::create(&exe_path)
+            .with_context(|| format!("Failed to create temp executable at {:?}", exe_path))?;
+
+        file.write_all(f.data)
+            .with_context(|| "Failed to write executable data")?;
+
+        // Ensure all data is written to disk
+        file.sync_all()
+            .with_context(|| "Failed to sync executable to disk")?;
+
+        drop(file);  // Close file before executing
+
+        // Make executable (Unix only)
+        #[cfg(unix)]
         {
-            let mut file = File::create("test")
-                .with_context(|| "Failed to create executable file")?;
-            file.write_all(f.data)
-                .with_context(|| "Failed to write executable data")?;
+            std::fs::set_permissions(&exe_path, std::fs::Permissions::from_mode(0o700))
+                .with_context(|| format!("Failed to set executable permissions on {:?}", exe_path))?;
         }
 
-        // make exe executable
-        std::fs::set_permissions("test", std::fs::Permissions::from_mode(0o700))
-            .with_context(|| "Failed to set executable permissions")?;
-
-        let mut p = Command::new("./test")
+        // Spawn the executable
+        let mut p = Command::new(&exe_path)
             .stderr(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()
-            .with_context(|| "Failed to spawn executable process")?;
+            .with_context(|| format!("Failed to spawn executable: {:?}", exe_path))?;
+
+        info!("Spawned process with PID: {:?}", p.id());
 
         let (stdout_tx, stdout_rx) = channel();
         let (stderr_tx, stderr_rx) = channel();
@@ -217,6 +247,7 @@ impl Context {
         self.stdout = Some(stdout_rx);
         self.stderr = Some(stderr_rx);
         self.proc = Some(p);
+        self.temp_exe_path = Some(exe_path);  // Store for cleanup
 
         Ok(())
     }
