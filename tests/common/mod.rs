@@ -46,8 +46,8 @@ pub fn start_test_server(port: u16) -> Result<Child> {
         .arg(port.to_string())
         .arg("--bind-address")
         .arg("127.0.0.1")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .spawn()
         .context("Failed to start test server")?;
 

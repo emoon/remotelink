@@ -37,4 +37,7 @@ pub struct Opt {
     #[arg(long, default_value = "127.0.0.1")]
     /// Bind address for remote runner (default: 127.0.0.1 for security)
     pub bind_address: String,
+    #[arg(short, long)]
+    /// Watch the executable file for changes and automatically restart when modified
+    pub watch: bool,
 }

@@ -1,3 +1,4 @@
+mod file_watcher;
 mod host;
 mod message_stream;
 mod messages;

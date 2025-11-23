@@ -89,11 +89,20 @@ fn handle_incoming_msg<S: Write + Read>(
             let is_launch_failure = reply.launch_status == -1 && reply.error_info.is_some();
 
             if is_launch_failure {
-                // Launch failure - exit regardless of watch mode
+                // Launch failure
                 if let Some(error) = reply.error_info {
                     log::error!("Failed to launch executable: {}", error);
                 }
-                return Ok(None); // Exit host loop
+
+                // In watch mode, continue watching (user might fix the executable)
+                // In normal mode, exit
+                if watch_mode {
+                    warn!("Launch failed in watch mode, waiting for next file change");
+                    msg_stream.begin_read(stream, false)?;
+                    return Ok(Some(false)); // Process not running, but continue watching
+                } else {
+                    return Ok(None); // Exit host loop
+                }
             }
 
             // Normal process exit
