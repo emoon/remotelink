@@ -18,6 +18,14 @@ pub enum Messages {
     StdoutOutput = 6,
     StderrOutput = 7,
     NoMessage = 8,
+    FileOpenRequest = 9,
+    FileOpenReply = 10,
+    FileReadRequest = 11,
+    FileReadReply = 12,
+    FileCloseRequest = 13,
+    FileCloseReply = 14,
+    FileStatRequest = 15,
+    FileStatReply = 16,
 }
 
 impl Messages {
@@ -34,6 +42,14 @@ impl Messages {
             6 => Ok(Messages::StdoutOutput),
             7 => Ok(Messages::StderrOutput),
             8 => Ok(Messages::NoMessage),
+            9 => Ok(Messages::FileOpenRequest),
+            10 => Ok(Messages::FileOpenReply),
+            11 => Ok(Messages::FileReadRequest),
+            12 => Ok(Messages::FileReadReply),
+            13 => Ok(Messages::FileCloseRequest),
+            14 => Ok(Messages::FileCloseReply),
+            15 => Ok(Messages::FileStatRequest),
+            16 => Ok(Messages::FileStatReply),
             _ => Err(anyhow!("Invalid message type: {}", value)),
         }
     }
@@ -77,6 +93,70 @@ pub struct StopExecutableRequest {
 #[derive(Serialize, Deserialize, Debug, Default)]
 pub struct StopExecutableReply {
     dummy: u32,
+}
+
+// File server protocol messages
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct FileOpenRequest<'a> {
+    /// Path relative to the file server's base directory
+    pub path: &'a str,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct FileOpenReply {
+    /// File handle (0 means error)
+    pub handle: u32,
+    /// File size in bytes
+    pub size: u64,
+    /// Error code (0 = success, errno values for errors)
+    pub error: i32,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct FileReadRequest {
+    /// File handle from FileOpenReply
+    pub handle: u32,
+    /// Offset in file to read from
+    pub offset: u64,
+    /// Number of bytes to read (max 4MB)
+    pub size: u32,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct FileReadReply<'a> {
+    /// Data read from file
+    pub data: &'a [u8],
+    /// Error code (0 = success, errno values for errors)
+    pub error: i32,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct FileCloseRequest {
+    /// File handle to close
+    pub handle: u32,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct FileCloseReply {
+    /// Error code (0 = success, errno values for errors)
+    pub error: i32,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct FileStatRequest<'a> {
+    /// Path relative to the file server's base directory
+    pub path: &'a str,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct FileStatReply {
+    /// File size in bytes
+    pub size: u64,
+    /// Last modification time (Unix timestamp)
+    pub mtime: i64,
+    /// Error code (0 = success, errno values for errors)
+    pub error: i32,
 }
 
 #[allow(dead_code)]
@@ -129,13 +209,21 @@ mod tests {
         assert!(matches!(Messages::from_u8(6).unwrap(), Messages::StdoutOutput));
         assert!(matches!(Messages::from_u8(7).unwrap(), Messages::StderrOutput));
         assert!(matches!(Messages::from_u8(8).unwrap(), Messages::NoMessage));
+        assert!(matches!(Messages::from_u8(9).unwrap(), Messages::FileOpenRequest));
+        assert!(matches!(Messages::from_u8(10).unwrap(), Messages::FileOpenReply));
+        assert!(matches!(Messages::from_u8(11).unwrap(), Messages::FileReadRequest));
+        assert!(matches!(Messages::from_u8(12).unwrap(), Messages::FileReadReply));
+        assert!(matches!(Messages::from_u8(13).unwrap(), Messages::FileCloseRequest));
+        assert!(matches!(Messages::from_u8(14).unwrap(), Messages::FileCloseReply));
+        assert!(matches!(Messages::from_u8(15).unwrap(), Messages::FileStatRequest));
+        assert!(matches!(Messages::from_u8(16).unwrap(), Messages::FileStatReply));
     }
 
     #[test]
     fn test_from_u8_invalid_messages() {
         // Test various invalid values
-        assert!(Messages::from_u8(9).is_err());
-        assert!(Messages::from_u8(10).is_err());
+        assert!(Messages::from_u8(17).is_err());
+        assert!(Messages::from_u8(100).is_err());
         assert!(Messages::from_u8(255).is_err());
     }
 
@@ -147,5 +235,92 @@ mod tests {
         let err_msg = format!("{}", result.unwrap_err());
         assert!(err_msg.contains("Invalid message type"));
         assert!(err_msg.contains("42"));
+    }
+
+    #[test]
+    fn test_file_open_request_serialization() {
+        let request = FileOpenRequest { path: "test/file.txt" };
+        let serialized = bincode::serialize(&request).unwrap();
+        let deserialized: FileOpenRequest = bincode::deserialize(&serialized).unwrap();
+        assert_eq!(deserialized.path, "test/file.txt");
+    }
+
+    #[test]
+    fn test_file_open_reply_serialization() {
+        let reply = FileOpenReply {
+            handle: 42,
+            size: 1024,
+            error: 0,
+        };
+        let serialized = bincode::serialize(&reply).unwrap();
+        let deserialized: FileOpenReply = bincode::deserialize(&serialized).unwrap();
+        assert_eq!(deserialized.handle, 42);
+        assert_eq!(deserialized.size, 1024);
+        assert_eq!(deserialized.error, 0);
+    }
+
+    #[test]
+    fn test_file_read_request_serialization() {
+        let request = FileReadRequest {
+            handle: 42,
+            offset: 1024,
+            size: 512,
+        };
+        let serialized = bincode::serialize(&request).unwrap();
+        let deserialized: FileReadRequest = bincode::deserialize(&serialized).unwrap();
+        assert_eq!(deserialized.handle, 42);
+        assert_eq!(deserialized.offset, 1024);
+        assert_eq!(deserialized.size, 512);
+    }
+
+    #[test]
+    fn test_file_read_reply_serialization() {
+        let data = b"Hello, World!";
+        let reply = FileReadReply {
+            data,
+            error: 0,
+        };
+        let serialized = bincode::serialize(&reply).unwrap();
+        let deserialized: FileReadReply = bincode::deserialize(&serialized).unwrap();
+        assert_eq!(deserialized.data, data);
+        assert_eq!(deserialized.error, 0);
+    }
+
+    #[test]
+    fn test_file_close_request_serialization() {
+        let request = FileCloseRequest { handle: 42 };
+        let serialized = bincode::serialize(&request).unwrap();
+        let deserialized: FileCloseRequest = bincode::deserialize(&serialized).unwrap();
+        assert_eq!(deserialized.handle, 42);
+    }
+
+    #[test]
+    fn test_file_close_reply_serialization() {
+        let reply = FileCloseReply { error: 0 };
+        let serialized = bincode::serialize(&reply).unwrap();
+        let deserialized: FileCloseReply = bincode::deserialize(&serialized).unwrap();
+        assert_eq!(deserialized.error, 0);
+    }
+
+    #[test]
+    fn test_file_stat_request_serialization() {
+        let request = FileStatRequest { path: "test/file.txt" };
+        let serialized = bincode::serialize(&request).unwrap();
+        let deserialized: FileStatRequest = bincode::deserialize(&serialized).unwrap();
+        assert_eq!(deserialized.path, "test/file.txt");
+    }
+
+    #[test]
+    fn test_file_stat_reply_serialization() {
+        let reply = FileStatReply {
+            size: 2048,
+            mtime: 1234567890,
+            error: 0,
+        };
+        let serialized = bincode::serialize(&reply).unwrap();
+        let deserialized: FileStatReply = bincode::deserialize(&serialized).unwrap();
+        assert_eq!(deserialized.size, 2048);
+        assert_eq!(deserialized.mtime, 1234567890);
+        assert_eq!(deserialized.error, 0);
     }
 }

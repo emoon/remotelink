@@ -1,0 +1,14 @@
+[package]
+name = "remotelink_preload"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "remotelink_preload"
+crate-type = ["cdylib"]
+
+[dependencies]
+libc = "0.2"
+
+# Use the remotelink_client for file server communication
+remotelink_client = { path = "../remotelink_client" }

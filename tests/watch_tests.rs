@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
+use serial_test::serial;
 
 /// Helper to compile a test program and return its path
 fn compile_watch_test_program(source: &str, name: &str) -> Result<PathBuf> {
@@ -42,6 +43,7 @@ fn recompile_test_program(source: &str, exe_path: &PathBuf) -> Result<()> {
 }
 
 #[test]
+#[serial]
 fn test_watch_basic_restart() -> Result<()> {
     // Compile initial version
     let source_v1 = r#"
@@ -59,11 +61,7 @@ fn test_watch_basic_restart() -> Result<()> {
     // Start client with --watch flag
     let exe_path_clone = exe_path.clone();
     let client_thread = thread::spawn(move || {
-        Command::new("cargo")
-            .arg("run")
-            .arg("--bin")
-            .arg("remotelink")
-            .arg("--")
+        Command::new(common::get_remotelink_binary())
             .arg("--target")
             .arg("127.0.0.1")
             .arg("--port")
@@ -125,6 +123,7 @@ fn test_watch_basic_restart() -> Result<()> {
 }
 
 #[test]
+#[serial]
 fn test_watch_multiple_rebuilds() -> Result<()> {
     // Compile initial version that exits immediately
     let source = r#"
@@ -143,11 +142,7 @@ fn test_watch_multiple_rebuilds() -> Result<()> {
     // Start client with --watch
     let exe_path_clone = exe_path.clone();
     let client_thread = thread::spawn(move || {
-        Command::new("cargo")
-            .arg("run")
-            .arg("--bin")
-            .arg("remotelink")
-            .arg("--")
+        Command::new(common::get_remotelink_binary())
             .arg("--target")
             .arg("127.0.0.1")
             .arg("--port")
@@ -212,6 +207,7 @@ fn test_watch_multiple_rebuilds() -> Result<()> {
 }
 
 #[test]
+#[serial]
 fn test_watch_stability_detection() -> Result<()> {
     // This test verifies that the watcher waits for file to be fully written
     // We'll simulate a slow write by writing in chunks
@@ -228,11 +224,7 @@ fn test_watch_stability_detection() -> Result<()> {
     // Start client with watch
     let exe_path_clone = exe_path.clone();
     let client_thread = thread::spawn(move || {
-        Command::new("cargo")
-            .arg("run")
-            .arg("--bin")
-            .arg("remotelink")
-            .arg("--")
+        Command::new(common::get_remotelink_binary())
             .arg("--target")
             .arg("127.0.0.1")
             .arg("--port")
@@ -309,6 +301,7 @@ fn test_watch_stability_detection() -> Result<()> {
 }
 
 #[test]
+#[serial]
 fn test_no_watch_flag_behaves_normally() -> Result<()> {
     // Verify that WITHOUT --watch flag, behavior is unchanged
     let source = r#"
@@ -323,11 +316,7 @@ fn test_no_watch_flag_behaves_normally() -> Result<()> {
     thread::sleep(Duration::from_millis(500));
 
     // Run WITHOUT --watch flag
-    let output = Command::new("cargo")
-        .arg("run")
-        .arg("--bin")
-        .arg("remotelink")
-        .arg("--")
+    let output = Command::new(common::get_remotelink_binary())
         .arg("--target")
         .arg("127.0.0.1")
         .arg("--port")
@@ -359,6 +348,7 @@ fn test_no_watch_flag_behaves_normally() -> Result<()> {
 }
 
 #[test]
+#[serial]
 fn test_watch_process_exit_then_rebuild() -> Result<()> {
     // Test scenario: process exits naturally, then user rebuilds
     // Watch mode should detect the rebuild and restart
@@ -377,11 +367,7 @@ fn test_watch_process_exit_then_rebuild() -> Result<()> {
 
     let exe_path_clone = exe_path.clone();
     let client_thread = thread::spawn(move || {
-        Command::new("cargo")
-            .arg("run")
-            .arg("--bin")
-            .arg("remotelink")
-            .arg("--")
+        Command::new(common::get_remotelink_binary())
             .arg("--target")
             .arg("127.0.0.1")
             .arg("--port")

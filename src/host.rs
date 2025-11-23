@@ -141,14 +141,14 @@ fn send_file<S: Write + Read>(
     msg_stream: &mut MessageStream,
     stream: &mut S,
     filename: &str,
+    file_server_enabled: bool,
 ) -> Result<()> {
     let mut buffer = Vec::new();
     let mut f = File::open(filename)?;
     f.read_to_end(&mut buffer)?;
 
     let file_request = LaunchExecutableRequest {
-        // TODO: Implement file serving
-        file_server: false,
+        file_server: file_server_enabled,
         path: filename,
         data: &buffer,
     };
@@ -317,13 +317,24 @@ fn restart_executable<S: Write + Read>(
 
     // Send new executable
     debug!("Sending new executable file");
-    send_file(msg_stream, stream, filename.to_str().unwrap())?;
+    // In watch mode, we need to know if file server is enabled
+    // We'll get this from the environment variable we set earlier
+    let file_server_enabled = std::env::var("REMOTELINK_FILE_SERVER_ENABLED").is_ok();
+    send_file(msg_stream, stream, filename.to_str().unwrap(), file_server_enabled)?;
 
     // File sent successfully, process should be starting
     Ok(true)
 }
 
 pub fn host_loop(opts: &Opt, ip_address: &str) -> Result<()> {
+    // Start file server if --file-dir is specified
+    let _file_server_handle = if let Some(ref file_dir) = opts.file_dir {
+        std::env::set_var("REMOTELINK_FILE_SERVER_ENABLED", "1");
+        Some(crate::file_server::start_file_server(file_dir.clone())?)
+    } else {
+        None
+    };
+
     let ip_adress: std::net::IpAddr = ip_address.parse()?;
     let address = SocketAddr::new(ip_adress, opts.port);
 
@@ -356,7 +367,8 @@ pub fn host_loop(opts: &Opt, ip_address: &str) -> Result<()> {
 
     // read file to be sent
     if let Some(target) = opts.filename.as_ref() {
-        send_file(&mut msg_stream, &mut stream, target)?;
+        let file_server_enabled = opts.file_dir.is_some();
+        send_file(&mut msg_stream, &mut stream, target, file_server_enabled)?;
         process_running = true;
     }
 
