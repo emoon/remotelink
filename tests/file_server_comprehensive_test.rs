@@ -1,6 +1,5 @@
 /// Comprehensive end-to-end test for the file server
 /// This test starts one server and performs all operations to avoid port conflicts
-
 use std::fs;
 use std::thread;
 use std::time::Duration;
@@ -70,17 +69,26 @@ fn test_file_server_comprehensive() {
         // Read first 10 bytes
         let data = client.read(handle, 0, 10).unwrap();
         assert_eq!(data, b"0123456789");
-        println!("✓ Read bytes 0-9: {:?}", std::str::from_utf8(&data).unwrap());
+        println!(
+            "✓ Read bytes 0-9: {:?}",
+            std::str::from_utf8(&data).unwrap()
+        );
 
         // Read middle 10 bytes
         let data = client.read(handle, 10, 10).unwrap();
         assert_eq!(data, b"ABCDEFGHIJ");
-        println!("✓ Read bytes 10-19: {:?}", std::str::from_utf8(&data).unwrap());
+        println!(
+            "✓ Read bytes 10-19: {:?}",
+            std::str::from_utf8(&data).unwrap()
+        );
 
         // Read last part
         let data = client.read(handle, 20, 16).unwrap();
         assert_eq!(data, b"KLMNOPQRSTUVWXYZ");
-        println!("✓ Read bytes 20-35: {:?}", std::str::from_utf8(&data).unwrap());
+        println!(
+            "✓ Read bytes 20-35: {:?}",
+            std::str::from_utf8(&data).unwrap()
+        );
 
         client.close(handle).unwrap();
         println!("✓ Closed test2.txt");
@@ -110,7 +118,10 @@ fn test_file_server_comprehensive() {
         let (handle1, _) = client.open("test1.txt").unwrap();
         let (handle2, _) = client.open("test2.txt").unwrap();
         let (handle3, _) = client.open("test3.txt").unwrap();
-        println!("✓ Multiple files opened: handles {}, {}, {}", handle1, handle2, handle3);
+        println!(
+            "✓ Multiple files opened: handles {}, {}, {}",
+            handle1, handle2, handle3
+        );
 
         client.close(handle1).unwrap();
         client.close(handle2).unwrap();

@@ -39,11 +39,14 @@ impl FdMap {
             self.next_vfd = VIRTUAL_FD_BASE;
         }
 
-        self.fd_to_info.insert(vfd, FileInfo {
-            handle,
-            offset: 0,
-            size: 0, // Will be set by caller if needed
-        });
+        self.fd_to_info.insert(
+            vfd,
+            FileInfo {
+                handle,
+                offset: 0,
+                size: 0, // Will be set by caller if needed
+            },
+        );
 
         Some(vfd)
     }

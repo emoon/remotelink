@@ -16,12 +16,12 @@ struct FileSnapshot {
 impl FileSnapshot {
     /// Take a snapshot of file metadata
     fn from_path(path: &Path) -> Result<Self> {
-        let metadata = fs::metadata(path)
-            .context("Failed to read file metadata")?;
+        let metadata = fs::metadata(path).context("Failed to read file metadata")?;
 
         Ok(FileSnapshot {
             size: metadata.len(),
-            modified: metadata.modified()
+            modified: metadata
+                .modified()
                 .context("Failed to get file modification time")?,
         })
     }
@@ -35,7 +35,9 @@ impl FileSnapshot {
 /// File watcher that monitors a file for changes and ensures stability before notifying
 pub struct FileWatcher {
     _debouncer: notify_debouncer_mini::Debouncer<notify_debouncer_mini::notify::RecommendedWatcher>,
-    event_rx: Receiver<Result<Vec<notify_debouncer_mini::DebouncedEvent>, notify_debouncer_mini::notify::Error>>,
+    event_rx: Receiver<
+        Result<Vec<notify_debouncer_mini::DebouncedEvent>, notify_debouncer_mini::notify::Error>,
+    >,
     file_path: PathBuf,
     last_notified_snapshot: Option<FileSnapshot>,
 }
@@ -57,7 +59,8 @@ impl FileWatcher {
             .context("Failed to create file watcher debouncer")?;
 
         // Watch the file (not recursive since we're watching a single file)
-        debouncer.watcher()
+        debouncer
+            .watcher()
             .watch(&path_buf, RecursiveMode::NonRecursive)
             .context("Failed to start watching file")?;
 
@@ -81,12 +84,15 @@ impl FileWatcher {
             match self.event_rx.try_recv() {
                 Ok(Ok(events)) => {
                     // Process events to see if any are actual modifications
-                    let has_modification = events.iter().any(|event| {
-                        matches!(event.kind, DebouncedEventKind::Any)
-                    });
+                    let has_modification = events
+                        .iter()
+                        .any(|event| matches!(event.kind, DebouncedEventKind::Any));
 
                     if has_modification {
-                        trace!("File modification event detected for {}", self.file_path.display());
+                        trace!(
+                            "File modification event detected for {}",
+                            self.file_path.display()
+                        );
                         has_event = true;
                     }
                 }
@@ -106,7 +112,10 @@ impl FileWatcher {
         }
 
         // File was modified - now verify it's stable
-        debug!("Change detected, verifying file stability for {}", self.file_path.display());
+        debug!(
+            "Change detected, verifying file stability for {}",
+            self.file_path.display()
+        );
 
         if self.is_file_stable()? {
             let current_snapshot = FileSnapshot::from_path(&self.file_path)?;
@@ -118,7 +127,10 @@ impl FileWatcher {
             };
 
             if is_new_version {
-                info!("File change verified as stable: {}", self.file_path.display());
+                info!(
+                    "File change verified as stable: {}",
+                    self.file_path.display()
+                );
                 self.last_notified_snapshot = Some(current_snapshot);
                 return Ok(true);
             } else {
@@ -136,7 +148,10 @@ impl FileWatcher {
     fn is_file_stable(&self) -> Result<bool> {
         // Check if file exists
         if !self.file_path.exists() {
-            debug!("File does not exist (may be deleted during rebuild): {}", self.file_path.display());
+            debug!(
+                "File does not exist (may be deleted during rebuild): {}",
+                self.file_path.display()
+            );
             return Ok(false);
         }
 
@@ -154,7 +169,10 @@ impl FileWatcher {
 
         // Check if file still exists (could be deleted and recreated during build)
         if !self.file_path.exists() {
-            debug!("File disappeared during stability check: {}", self.file_path.display());
+            debug!(
+                "File disappeared during stability check: {}",
+                self.file_path.display()
+            );
             return Ok(false);
         }
 
@@ -179,7 +197,10 @@ impl FileWatcher {
 
         // Check existence again
         if !self.file_path.exists() {
-            debug!("File disappeared during second stability check: {}", self.file_path.display());
+            debug!(
+                "File disappeared during second stability check: {}",
+                self.file_path.display()
+            );
             return Ok(false);
         }
 
@@ -302,7 +323,10 @@ mod tests {
 
         // Now should be stable
         let is_stable_final = watcher.is_file_stable()?;
-        assert!(is_stable_final, "File should be stable after writes complete");
+        assert!(
+            is_stable_final,
+            "File should be stable after writes complete"
+        );
 
         // Cleanup
         fs::remove_file(&test_file)?;

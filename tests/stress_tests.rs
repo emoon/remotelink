@@ -74,7 +74,11 @@ fn test_high_volume_output() -> Result<()> {
     // Verify all lines received
     let stdout = String::from_utf8_lossy(&output.stdout);
     let line_count = stdout.lines().count();
-    assert!(line_count >= 99000, "Not all lines received: {}", line_count);
+    assert!(
+        line_count >= 99000,
+        "Not all lines received: {}",
+        line_count
+    );
 
     common::cleanup_test_executable(&exe_path);
     common::stop_test_server(server)?;

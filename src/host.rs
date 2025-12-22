@@ -225,7 +225,10 @@ fn process_messages<S: Write + Read>(
     stream: &mut S,
     watch_mode: bool,
 ) -> Result<Option<Option<bool>>> {
-    if let Some(msg) = msg_stream.update(stream).context("Failed to update message stream")? {
+    if let Some(msg) = msg_stream
+        .update(stream)
+        .context("Failed to update message stream")?
+    {
         match handle_incoming_msg(msg_stream, stream, msg, watch_mode)
             .context("Failed to handle incoming message")?
         {
@@ -280,7 +283,10 @@ fn restart_executable<S: Write + Read>(
     filename: &Path,
     process_running: bool,
 ) -> Result<bool> {
-    info!("Restarting executable with new version: {}", filename.display());
+    info!(
+        "Restarting executable with new version: {}",
+        filename.display()
+    );
 
     // If process is running, stop it first
     if process_running {
@@ -320,7 +326,12 @@ fn restart_executable<S: Write + Read>(
     // In watch mode, we need to know if file server is enabled
     // We'll get this from the environment variable we set earlier
     let file_server_enabled = std::env::var("REMOTELINK_FILE_SERVER_ENABLED").is_ok();
-    send_file(msg_stream, stream, filename.to_str().unwrap(), file_server_enabled)?;
+    send_file(
+        msg_stream,
+        stream,
+        filename.to_str().unwrap(),
+        file_server_enabled,
+    )?;
 
     // File sent successfully, process should be starting
     Ok(true)
@@ -338,12 +349,14 @@ pub fn host_loop(opts: &Opt, ip_address: &str) -> Result<()> {
     let ip_adress: std::net::IpAddr = ip_address.parse()?;
     let address = SocketAddr::new(ip_adress, opts.port);
 
-    info!("Connecting to {} with timeout of {}s", address, opts.connect_timeout_secs);
+    info!(
+        "Connecting to {} with timeout of {}s",
+        address, opts.connect_timeout_secs
+    );
 
-    let mut stream = TcpStream::connect_timeout(
-        &address,
-        Duration::from_secs(opts.connect_timeout_secs)
-    ).context("Failed to connect to remote runner")?;
+    let mut stream =
+        TcpStream::connect_timeout(&address, Duration::from_secs(opts.connect_timeout_secs))
+            .context("Failed to connect to remote runner")?;
 
     info!("Connected to {}", address);
 
@@ -353,7 +366,8 @@ pub fn host_loop(opts: &Opt, ip_address: &str) -> Result<()> {
         Duration::from_secs(opts.read_timeout_secs),
         Duration::from_secs(opts.write_timeout_secs),
         Duration::from_secs(opts.keepalive_secs),
-    ).context("Failed to configure stream timeouts")?;
+    )
+    .context("Failed to configure stream timeouts")?;
 
     handshake(&mut stream)?;
 

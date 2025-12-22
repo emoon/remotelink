@@ -1,8 +1,8 @@
 mod common;
 
 use anyhow::Result;
-use std::time::Duration;
 use std::thread;
+use std::time::Duration;
 
 #[test]
 fn test_connection_timeout() -> Result<()> {

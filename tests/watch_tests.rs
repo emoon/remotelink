@@ -1,13 +1,13 @@
 mod common;
 
 use anyhow::{Context, Result};
+use serial_test::serial;
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
-use serial_test::serial;
 
 /// Helper to compile a test program and return its path
 fn compile_watch_test_program(source: &str, name: &str) -> Result<PathBuf> {
@@ -17,11 +17,13 @@ fn compile_watch_test_program(source: &str, name: &str) -> Result<PathBuf> {
 /// Helper to recompile a test program (simulating a rebuild)
 fn recompile_test_program(source: &str, exe_path: &PathBuf) -> Result<()> {
     let temp_dir = std::env::temp_dir();
-    let source_file = temp_dir.join(format!("{}_rebuild.rs", exe_path.file_name().unwrap().to_str().unwrap()));
+    let source_file = temp_dir.join(format!(
+        "{}_rebuild.rs",
+        exe_path.file_name().unwrap().to_str().unwrap()
+    ));
 
     // Write new source code
-    fs::write(&source_file, source)
-        .context("Failed to write test source file")?;
+    fs::write(&source_file, source).context("Failed to write test source file")?;
 
     // Compile it to the same output path
     let output = Command::new("rustc")
@@ -109,10 +111,14 @@ fn test_watch_basic_restart() -> Result<()> {
     println!("STDERR:\n{}", stderr);
 
     // Verify that both versions ran
-    assert!(stdout.contains("Version 1") || stderr.contains("Version 1"),
-            "Expected 'Version 1' in output");
-    assert!(stdout.contains("Version 2") || stderr.contains("Version 2"),
-            "Expected 'Version 2' in output - watch restart should have occurred");
+    assert!(
+        stdout.contains("Version 1") || stderr.contains("Version 1"),
+        "Expected 'Version 1' in output"
+    );
+    assert!(
+        stdout.contains("Version 2") || stderr.contains("Version 2"),
+        "Expected 'Version 2' in output - watch restart should have occurred"
+    );
 
     // Cleanup
     common::cleanup_test_executable(&exe_path);
@@ -191,12 +197,16 @@ fn test_watch_multiple_rebuilds() -> Result<()> {
     println!("STDERR:\n{}", stderr);
 
     // Should see at least the initial version and one rebuilt version
-    assert!(stdout.contains("Iteration 0") || stderr.contains("Iteration 0"),
-            "Expected 'Iteration 0' in output");
+    assert!(
+        stdout.contains("Iteration 0") || stderr.contains("Iteration 0"),
+        "Expected 'Iteration 0' in output"
+    );
     // At least one rebuild should have been detected and run
-    assert!((stdout.contains("Iteration 1") || stderr.contains("Iteration 1")) ||
-            (stdout.contains("Iteration 2") || stderr.contains("Iteration 2")),
-            "Expected at least one rebuild (Iteration 1 or 2) in output");
+    assert!(
+        (stdout.contains("Iteration 1") || stderr.contains("Iteration 1"))
+            || (stdout.contains("Iteration 2") || stderr.contains("Iteration 2")),
+        "Expected at least one rebuild (Iteration 1 or 2) in output"
+    );
 
     // Cleanup
     common::cleanup_test_executable(&exe_path);
@@ -212,10 +222,8 @@ fn test_watch_stability_detection() -> Result<()> {
     // This test verifies that the watcher waits for file to be fully written
     // We'll simulate a slow write by writing in chunks
 
-    let exe_path = common::compile_test_program(
-        r#"fn main() { println!("Test"); }"#,
-        "watch_stability"
-    )?;
+    let exe_path =
+        common::compile_test_program(r#"fn main() { println!("Test"); }"#, "watch_stability")?;
 
     let port = common::find_available_port();
     let server = common::start_test_server(port)?;

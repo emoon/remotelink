@@ -98,9 +98,7 @@ impl MessageStream {
                 }
             }
 
-            State::ReadData => {
-                self.read_data(stream)
-            }
+            State::ReadData => self.read_data(stream),
 
             State::Complete => Ok(None),
         }
@@ -183,16 +181,14 @@ impl MessageStream {
     fn write<S: Write + Read>(stream: &mut S, data: &[u8]) -> Result<usize> {
         match stream.write(data) {
             Ok(n) => Ok(n),
-            Err(err) => {
-                match err.kind() {
-                    std::io::ErrorKind::WouldBlock => Ok(0),
-                    std::io::ErrorKind::TimedOut => {
-                        warn!("Write timeout occurred");
-                        bail!("Write timeout");
-                    }
-                    _ => bail!(err),
+            Err(err) => match err.kind() {
+                std::io::ErrorKind::WouldBlock => Ok(0),
+                std::io::ErrorKind::TimedOut => {
+                    warn!("Write timeout occurred");
+                    bail!("Write timeout");
                 }
-            }
+                _ => bail!(err),
+            },
         }
     }
 
@@ -200,16 +196,14 @@ impl MessageStream {
     fn read<S: Write + Read>(data: &mut [u8], stream: &mut S) -> Result<usize> {
         match stream.read(data) {
             Ok(n) => Ok(n),
-            Err(err) => {
-                match err.kind() {
-                    std::io::ErrorKind::WouldBlock => Ok(0),
-                    std::io::ErrorKind::TimedOut => {
-                        warn!("Read timeout occurred");
-                        bail!("Read timeout");
-                    }
-                    _ => bail!(err),
+            Err(err) => match err.kind() {
+                std::io::ErrorKind::WouldBlock => Ok(0),
+                std::io::ErrorKind::TimedOut => {
+                    warn!("Read timeout occurred");
+                    bail!("Read timeout");
                 }
-            }
+                _ => bail!(err),
+            },
         }
     }
 
@@ -282,13 +276,14 @@ impl MessageStream {
             }
 
             // Log warning for large messages
-            if size > 100 * 1024 * 1024 {  // > 100MB
+            if size > 100 * 1024 * 1024 {
+                // > 100MB
                 warn!("Large message size: {} bytes", size);
             }
 
             self.data.resize(size as usize, 0);
-            self.message = Messages::from_u8(msg_type)
-                .context("Failed to parse message type from header")?;
+            self.message =
+                Messages::from_u8(msg_type).context("Failed to parse message type from header")?;
             self.state = State::ReadData;
         }
 

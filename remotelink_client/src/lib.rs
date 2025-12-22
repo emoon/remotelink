@@ -47,12 +47,7 @@ impl FileServerClient {
 
         // Send request
         msg_stream
-            .begin_write_message(
-                &mut *stream,
-                request,
-                request_type,
-                TransitionToRead::Yes,
-            )
+            .begin_write_message(&mut *stream, request, request_type, TransitionToRead::Yes)
             .map_err(|_| libc::EIO)?;
 
         // Wait for reply
@@ -79,8 +74,7 @@ impl FileServerClient {
             Messages::FileOpenRequest,
             Messages::FileOpenReply,
             |data| {
-                let reply: FileOpenReply =
-                    bincode::deserialize(data).map_err(|_| libc::EIO)?;
+                let reply: FileOpenReply = bincode::deserialize(data).map_err(|_| libc::EIO)?;
 
                 if reply.error != 0 {
                     return Err(reply.error);
@@ -105,8 +99,7 @@ impl FileServerClient {
             Messages::FileReadRequest,
             Messages::FileReadReply,
             |data| {
-                let reply: FileReadReply =
-                    bincode::deserialize(data).map_err(|_| libc::EIO)?;
+                let reply: FileReadReply = bincode::deserialize(data).map_err(|_| libc::EIO)?;
 
                 if reply.error != 0 {
                     return Err(reply.error);
@@ -127,8 +120,7 @@ impl FileServerClient {
             Messages::FileCloseRequest,
             Messages::FileCloseReply,
             |data| {
-                let reply: FileCloseReply =
-                    bincode::deserialize(data).map_err(|_| libc::EIO)?;
+                let reply: FileCloseReply = bincode::deserialize(data).map_err(|_| libc::EIO)?;
 
                 if reply.error != 0 {
                     return Err(reply.error);
@@ -149,8 +141,7 @@ impl FileServerClient {
             Messages::FileStatRequest,
             Messages::FileStatReply,
             |data| {
-                let reply: FileStatReply =
-                    bincode::deserialize(data).map_err(|_| libc::EIO)?;
+                let reply: FileStatReply = bincode::deserialize(data).map_err(|_| libc::EIO)?;
 
                 if reply.error != 0 {
                     return Err(reply.error);
@@ -170,6 +161,9 @@ mod tests {
     fn test_client_creation() {
         // This test would require a running server, so we just test that the types compile
         // In a real scenario, you'd use a mock or integration test
-        assert_eq!(std::mem::size_of::<FileServerClient>(), std::mem::size_of::<(RefCell<TcpStream>, RefCell<MessageStream>)>());
+        assert_eq!(
+            std::mem::size_of::<FileServerClient>(),
+            std::mem::size_of::<(RefCell<TcpStream>, RefCell<MessageStream>)>()
+        );
     }
 }

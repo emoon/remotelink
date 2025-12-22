@@ -71,8 +71,7 @@ impl FileServerState {
 
         let path = self.validate_path(rel_path)?;
 
-        let file = File::open(&path)
-            .with_context(|| format!("Failed to open file: {:?}", path))?;
+        let file = File::open(&path).with_context(|| format!("Failed to open file: {:?}", path))?;
 
         let size = file
             .metadata()
@@ -85,9 +84,13 @@ impl FileServerState {
             self.next_handle = 1; // Skip 0 as it indicates error
         }
 
-        self.open_files.insert(handle, OpenFile { file, path, size });
+        self.open_files
+            .insert(handle, OpenFile { file, path, size });
 
-        debug!("Opened file handle {} for {:?} (size: {} bytes)", handle, rel_path, size);
+        debug!(
+            "Opened file handle {} for {:?} (size: {} bytes)",
+            handle, rel_path, size
+        );
 
         Ok((handle, size))
     }
@@ -98,7 +101,8 @@ impl FileServerState {
             return Err(anyhow!("Read size exceeds maximum ({})", MAX_READ_SIZE));
         }
 
-        let open_file = self.open_files
+        let open_file = self
+            .open_files
             .get_mut(&handle)
             .ok_or_else(|| anyhow!("Invalid file handle"))?;
 
@@ -112,15 +116,31 @@ impl FileServerState {
         let bytes_to_read = std::cmp::min(size as u64, bytes_available) as usize;
 
         // Seek to offset
-        open_file.file.seek(SeekFrom::Start(offset))
-            .with_context(|| format!("Failed to seek to offset {} in {:?}", offset, open_file.path))?;
+        open_file
+            .file
+            .seek(SeekFrom::Start(offset))
+            .with_context(|| {
+                format!(
+                    "Failed to seek to offset {} in {:?}",
+                    offset, open_file.path
+                )
+            })?;
 
         // Read data
         let mut buffer = vec![0u8; bytes_to_read];
-        open_file.file.read_exact(&mut buffer)
-            .with_context(|| format!("Failed to read {} bytes from {:?}", bytes_to_read, open_file.path))?;
+        open_file.file.read_exact(&mut buffer).with_context(|| {
+            format!(
+                "Failed to read {} bytes from {:?}",
+                bytes_to_read, open_file.path
+            )
+        })?;
 
-        trace!("Read {} bytes from handle {} at offset {}", buffer.len(), handle, offset);
+        trace!(
+            "Read {} bytes from handle {} at offset {}",
+            buffer.len(),
+            handle,
+            offset
+        );
 
         Ok(buffer)
     }
@@ -140,8 +160,8 @@ impl FileServerState {
     fn stat_file(&self, rel_path: &str) -> Result<(u64, i64)> {
         let path = self.validate_path(rel_path)?;
 
-        let metadata = std::fs::metadata(&path)
-            .with_context(|| format!("Failed to stat file: {:?}", path))?;
+        let metadata =
+            std::fs::metadata(&path).with_context(|| format!("Failed to stat file: {:?}", path))?;
 
         let size = metadata.len();
         let mtime = metadata
@@ -156,11 +176,9 @@ impl FileServerState {
 }
 
 /// Handles a single file server client connection
-fn handle_file_client(
-    mut stream: TcpStream,
-    state: Arc<Mutex<FileServerState>>,
-) -> Result<()> {
-    let peer_addr = stream.peer_addr()
+fn handle_file_client(mut stream: TcpStream, state: Arc<Mutex<FileServerState>>) -> Result<()> {
+    let peer_addr = stream
+        .peer_addr()
         .unwrap_or_else(|_| "unknown:0".parse().unwrap());
 
     info!("File server: connection from {}", peer_addr);
@@ -183,7 +201,9 @@ fn handle_file_client(
             }
             Err(e) => {
                 // Check if it's a clean disconnect
-                if e.to_string().contains("UnexpectedEof") || e.to_string().contains("Connection reset") {
+                if e.to_string().contains("UnexpectedEof")
+                    || e.to_string().contains("Connection reset")
+                {
                     debug!("File server: client {} disconnected", peer_addr);
                     return Ok(());
                 }
@@ -225,7 +245,11 @@ fn handle_file_client(
                 let request: FileReadRequest = bincode::deserialize(&msg_stream.data)?;
 
                 let reply_data: Vec<u8>;
-                let reply = match state.lock().unwrap().read_file(request.handle, request.offset, request.size) {
+                let reply = match state.lock().unwrap().read_file(
+                    request.handle,
+                    request.offset,
+                    request.size,
+                ) {
                     Ok(data) => {
                         reply_data = data;
                         FileReadReply {
@@ -234,7 +258,10 @@ fn handle_file_client(
                         }
                     }
                     Err(e) => {
-                        warn!("File server: failed to read handle {}: {}", request.handle, e);
+                        warn!(
+                            "File server: failed to read handle {}: {}",
+                            request.handle, e
+                        );
                         reply_data = Vec::new();
                         FileReadReply {
                             data: &reply_data,
@@ -257,7 +284,10 @@ fn handle_file_client(
                 let reply = match state.lock().unwrap().close_file(request.handle) {
                     Ok(()) => FileCloseReply { error: 0 },
                     Err(e) => {
-                        warn!("File server: failed to close handle {}: {}", request.handle, e);
+                        warn!(
+                            "File server: failed to close handle {}: {}",
+                            request.handle, e
+                        );
                         FileCloseReply {
                             error: libc::EBADF, // Bad file descriptor
                         }
@@ -300,7 +330,10 @@ fn handle_file_client(
             }
 
             _ => {
-                warn!("File server: unexpected message type {:?} from {}", msg, peer_addr);
+                warn!(
+                    "File server: unexpected message type {:?} from {}",
+                    msg, peer_addr
+                );
                 return Err(anyhow!("Unexpected message type"));
             }
         }
@@ -318,18 +351,28 @@ pub fn start_file_server_on_port(base_dir: String, port: u16) -> Result<thread::
 
     // Validate base directory exists
     if !base_path.exists() {
-        return Err(anyhow!("File server directory does not exist: {:?}", base_path));
+        return Err(anyhow!(
+            "File server directory does not exist: {:?}",
+            base_path
+        ));
     }
 
     if !base_path.is_dir() {
-        return Err(anyhow!("File server path is not a directory: {:?}", base_path));
+        return Err(anyhow!(
+            "File server path is not a directory: {:?}",
+            base_path
+        ));
     }
 
     // Canonicalize to get absolute path
-    let canonical_base = base_path.canonicalize()
+    let canonical_base = base_path
+        .canonicalize()
         .with_context(|| format!("Failed to canonicalize base directory: {:?}", base_path))?;
 
-    info!("Starting file server on port {} serving {:?}", port, canonical_base);
+    info!(
+        "Starting file server on port {} serving {:?}",
+        port, canonical_base
+    );
 
     let state = Arc::new(Mutex::new(FileServerState::new(canonical_base)));
 
@@ -340,7 +383,7 @@ pub fn start_file_server_on_port(base_dir: String, port: u16) -> Result<thread::
 
             // Create socket manually to set SO_REUSEADDR before binding
             let listener = {
-                use std::net::{SocketAddr, Ipv4Addr};
+                use std::net::{Ipv4Addr, SocketAddr};
                 use std::os::unix::io::FromRawFd;
 
                 unsafe {
@@ -359,20 +402,24 @@ pub fn start_file_server_on_port(base_dir: String, port: u16) -> Result<thread::
                         libc::SO_REUSEADDR,
                         &optval as *const _ as *const libc::c_void,
                         std::mem::size_of_val(&optval) as libc::socklen_t,
-                    ) < 0 {
+                    ) < 0
+                    {
                         error!("File server failed to set SO_REUSEADDR");
                         libc::close(fd);
                         return;
                     }
 
                     // Bind
-                    let addr = SocketAddr::new(std::net::IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), port);
+                    let addr =
+                        SocketAddr::new(std::net::IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), port);
                     let sock_addr = match addr {
                         SocketAddr::V4(addr) => {
                             let mut storage: libc::sockaddr_in = std::mem::zeroed();
                             storage.sin_family = libc::AF_INET as libc::sa_family_t;
                             storage.sin_port = addr.port().to_be();
-                            storage.sin_addr = libc::in_addr { s_addr: u32::from(*addr.ip()).to_be() };
+                            storage.sin_addr = libc::in_addr {
+                                s_addr: u32::from(*addr.ip()).to_be(),
+                            };
                             storage
                         }
                         _ => {
@@ -386,7 +433,8 @@ pub fn start_file_server_on_port(base_dir: String, port: u16) -> Result<thread::
                         fd,
                         &sock_addr as *const _ as *const libc::sockaddr,
                         std::mem::size_of_val(&sock_addr) as libc::socklen_t,
-                    ) < 0 {
+                    ) < 0
+                    {
                         error!("File server failed to bind to {}", bind_addr);
                         libc::close(fd);
                         return;
@@ -418,7 +466,7 @@ pub fn start_file_server_on_port(base_dir: String, port: u16) -> Result<thread::
                     }
                     Err(e) => {
                         error!("File server failed to accept connection: {}", e);
-                        break;  // Break on error (allows clean shutdown)
+                        break; // Break on error (allows clean shutdown)
                     }
                 }
             }

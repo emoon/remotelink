@@ -1,9 +1,9 @@
 use anyhow::{Context, Result};
-use std::path::PathBuf;
-use std::process::{Command, Child, Stdio};
-use std::time::Duration;
-use std::thread;
 use std::net::TcpStream;
+use std::path::PathBuf;
+use std::process::{Child, Command, Stdio};
+use std::thread;
+use std::time::Duration;
 
 /// Get the path to the pre-built remotelink binary
 pub fn get_remotelink_binary() -> PathBuf {
@@ -24,8 +24,7 @@ pub fn compile_test_program(source: &str, name: &str) -> Result<PathBuf> {
     let exe_file = temp_dir.join(format!("remotelink_test_{}", name));
 
     // Write source code
-    std::fs::write(&source_file, source)
-        .context("Failed to write test source file")?;
+    std::fs::write(&source_file, source).context("Failed to write test source file")?;
 
     // Compile it
     let output = Command::new("rustc")

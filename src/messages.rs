@@ -200,23 +200,71 @@ mod tests {
 
     #[test]
     fn test_from_u8_valid_messages() {
-        assert!(matches!(Messages::from_u8(0).unwrap(), Messages::HandshakeRequest));
-        assert!(matches!(Messages::from_u8(1).unwrap(), Messages::HandshakeReply));
-        assert!(matches!(Messages::from_u8(2).unwrap(), Messages::LaunchExecutableRequest));
-        assert!(matches!(Messages::from_u8(3).unwrap(), Messages::LaunchExecutableReply));
-        assert!(matches!(Messages::from_u8(4).unwrap(), Messages::StopExecutableRequest));
-        assert!(matches!(Messages::from_u8(5).unwrap(), Messages::StopExecutableReply));
-        assert!(matches!(Messages::from_u8(6).unwrap(), Messages::StdoutOutput));
-        assert!(matches!(Messages::from_u8(7).unwrap(), Messages::StderrOutput));
+        assert!(matches!(
+            Messages::from_u8(0).unwrap(),
+            Messages::HandshakeRequest
+        ));
+        assert!(matches!(
+            Messages::from_u8(1).unwrap(),
+            Messages::HandshakeReply
+        ));
+        assert!(matches!(
+            Messages::from_u8(2).unwrap(),
+            Messages::LaunchExecutableRequest
+        ));
+        assert!(matches!(
+            Messages::from_u8(3).unwrap(),
+            Messages::LaunchExecutableReply
+        ));
+        assert!(matches!(
+            Messages::from_u8(4).unwrap(),
+            Messages::StopExecutableRequest
+        ));
+        assert!(matches!(
+            Messages::from_u8(5).unwrap(),
+            Messages::StopExecutableReply
+        ));
+        assert!(matches!(
+            Messages::from_u8(6).unwrap(),
+            Messages::StdoutOutput
+        ));
+        assert!(matches!(
+            Messages::from_u8(7).unwrap(),
+            Messages::StderrOutput
+        ));
         assert!(matches!(Messages::from_u8(8).unwrap(), Messages::NoMessage));
-        assert!(matches!(Messages::from_u8(9).unwrap(), Messages::FileOpenRequest));
-        assert!(matches!(Messages::from_u8(10).unwrap(), Messages::FileOpenReply));
-        assert!(matches!(Messages::from_u8(11).unwrap(), Messages::FileReadRequest));
-        assert!(matches!(Messages::from_u8(12).unwrap(), Messages::FileReadReply));
-        assert!(matches!(Messages::from_u8(13).unwrap(), Messages::FileCloseRequest));
-        assert!(matches!(Messages::from_u8(14).unwrap(), Messages::FileCloseReply));
-        assert!(matches!(Messages::from_u8(15).unwrap(), Messages::FileStatRequest));
-        assert!(matches!(Messages::from_u8(16).unwrap(), Messages::FileStatReply));
+        assert!(matches!(
+            Messages::from_u8(9).unwrap(),
+            Messages::FileOpenRequest
+        ));
+        assert!(matches!(
+            Messages::from_u8(10).unwrap(),
+            Messages::FileOpenReply
+        ));
+        assert!(matches!(
+            Messages::from_u8(11).unwrap(),
+            Messages::FileReadRequest
+        ));
+        assert!(matches!(
+            Messages::from_u8(12).unwrap(),
+            Messages::FileReadReply
+        ));
+        assert!(matches!(
+            Messages::from_u8(13).unwrap(),
+            Messages::FileCloseRequest
+        ));
+        assert!(matches!(
+            Messages::from_u8(14).unwrap(),
+            Messages::FileCloseReply
+        ));
+        assert!(matches!(
+            Messages::from_u8(15).unwrap(),
+            Messages::FileStatRequest
+        ));
+        assert!(matches!(
+            Messages::from_u8(16).unwrap(),
+            Messages::FileStatReply
+        ));
     }
 
     #[test]
@@ -239,7 +287,9 @@ mod tests {
 
     #[test]
     fn test_file_open_request_serialization() {
-        let request = FileOpenRequest { path: "test/file.txt" };
+        let request = FileOpenRequest {
+            path: "test/file.txt",
+        };
         let serialized = bincode::serialize(&request).unwrap();
         let deserialized: FileOpenRequest = bincode::deserialize(&serialized).unwrap();
         assert_eq!(deserialized.path, "test/file.txt");
@@ -276,10 +326,7 @@ mod tests {
     #[test]
     fn test_file_read_reply_serialization() {
         let data = b"Hello, World!";
-        let reply = FileReadReply {
-            data,
-            error: 0,
-        };
+        let reply = FileReadReply { data, error: 0 };
         let serialized = bincode::serialize(&reply).unwrap();
         let deserialized: FileReadReply = bincode::deserialize(&serialized).unwrap();
         assert_eq!(deserialized.data, data);
@@ -304,7 +351,9 @@ mod tests {
 
     #[test]
     fn test_file_stat_request_serialization() {
-        let request = FileStatRequest { path: "test/file.txt" };
+        let request = FileStatRequest {
+            path: "test/file.txt",
+        };
         let serialized = bincode::serialize(&request).unwrap();
         let deserialized: FileStatRequest = bincode::deserialize(&serialized).unwrap();
         assert_eq!(deserialized.path, "test/file.txt");

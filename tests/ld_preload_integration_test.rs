@@ -1,6 +1,5 @@
 /// End-to-end integration test for LD_PRELOAD file interception
 /// This test proves that the preload library actually intercepts /host/ paths
-
 use std::fs;
 use std::process::Command;
 use std::thread;
@@ -21,7 +20,10 @@ fn test_ld_preload_file_interception() {
     // Start file server
     let dir_path = temp_dir.path().to_str().unwrap().to_string();
     let server_handle = remotelink::file_server::start_file_server(dir_path).unwrap();
-    println!("✓ Started file server serving: {}", temp_dir.path().display());
+    println!(
+        "✓ Started file server serving: {}",
+        temp_dir.path().display()
+    );
 
     // Give server time to start
     thread::sleep(Duration::from_millis(300));
@@ -35,11 +37,7 @@ fn test_ld_preload_file_interception() {
     let test_binary = temp_dir.path().join("ld_preload_test");
 
     let compile_result = Command::new("gcc")
-        .args(&[
-            test_c_src,
-            "-o",
-            test_binary.to_str().unwrap(),
-        ])
+        .args(&[test_c_src, "-o", test_binary.to_str().unwrap()])
         .output();
 
     match compile_result {
@@ -83,7 +81,10 @@ fn test_ld_preload_file_interception() {
 
     // Check result
     if !result.status.success() {
-        panic!("Test program failed with exit code: {:?}", result.status.code());
+        panic!(
+            "Test program failed with exit code: {:?}",
+            result.status.code()
+        );
     }
 
     println!("✅ LD_PRELOAD INTEGRATION TEST PASSED!\n");
@@ -118,7 +119,10 @@ fn find_preload_library() -> String {
         .expect("Failed to build preload library");
 
     if !build_result.status.success() {
-        panic!("Failed to build preload library:\n{}", String::from_utf8_lossy(&build_result.stderr));
+        panic!(
+            "Failed to build preload library:\n{}",
+            String::from_utf8_lossy(&build_result.stderr)
+        );
     }
 
     "./target/release/libremotelink_preload.so".to_string()

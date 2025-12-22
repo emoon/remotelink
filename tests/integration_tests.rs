@@ -1,9 +1,9 @@
 mod common;
 
 use anyhow::{Context, Result};
-use std::process::Command;  // Used for connection_limit test
-use std::time::Duration;
+use std::process::Command; // Used for connection_limit test
 use std::thread;
+use std::time::Duration;
 
 #[test]
 fn test_basic_connection() -> Result<()> {
@@ -38,7 +38,11 @@ fn test_simple_execution() -> Result<()> {
 
     // Verify output
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Hello from test"), "Expected 'Hello from test' in stdout, got: {}", stdout);
+    assert!(
+        stdout.contains("Hello from test"),
+        "Expected 'Hello from test' in stdout, got: {}",
+        stdout
+    );
 
     // Cleanup
     common::cleanup_test_executable(&exe_path);
@@ -149,11 +153,15 @@ fn test_multiple_sequential_executions() -> Result<()> {
 
     // Run 5 sequential executions
     for i in 0..5 {
-        let output = common::run_client(port, &exe_path)
-            .context(format!("Failed on iteration {}", i))?;
+        let output =
+            common::run_client(port, &exe_path).context(format!("Failed on iteration {}", i))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(stdout.contains("Test execution"), "Failed on iteration {}", i);
+        assert!(
+            stdout.contains("Test execution"),
+            "Failed on iteration {}",
+            i
+        );
     }
 
     common::cleanup_test_executable(&exe_path);

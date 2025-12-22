@@ -22,10 +22,12 @@ pub fn configure_stream_timeouts(
     write_timeout: Duration,
     _keepalive: Duration,
 ) -> Result<()> {
-    stream.set_read_timeout(Some(read_timeout))
+    stream
+        .set_read_timeout(Some(read_timeout))
         .context("Failed to set read timeout")?;
 
-    stream.set_write_timeout(Some(write_timeout))
+    stream
+        .set_write_timeout(Some(write_timeout))
         .context("Failed to set write timeout")?;
 
     // Note: TCP keepalive is a socket option that requires platform-specific APIs.
@@ -44,15 +46,16 @@ pub fn configure_stream_timeouts(
                 libc::SO_KEEPALIVE,
                 &optval as *const _ as *const libc::c_void,
                 std::mem::size_of_val(&optval) as libc::socklen_t,
-            ) < 0 {
-                return Err(std::io::Error::last_os_error())
-                    .context("Failed to set SO_KEEPALIVE");
+            ) < 0
+            {
+                return Err(std::io::Error::last_os_error()).context("Failed to set SO_KEEPALIVE");
             }
         }
     }
 
     // Disable Nagle's algorithm for lower latency
-    stream.set_nodelay(true)
+    stream
+        .set_nodelay(true)
         .context("Failed to set TCP_NODELAY")?;
 
     Ok(())
@@ -80,8 +83,9 @@ fn main() -> Result<()> {
         remote_runner::update(&opt)?;
     } else {
         println!("Starting host");
-        let target = opt.target.as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Target IP address is required when not in remote-runner mode"))?;
+        let target = opt.target.as_ref().ok_or_else(|| {
+            anyhow::anyhow!("Target IP address is required when not in remote-runner mode")
+        })?;
         host::host_loop(&opt, target)?;
     }
 
