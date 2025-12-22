@@ -37,7 +37,7 @@ remotelink --target <ip> --filename ./my_program --file-dir /path/to/data
 
 ### How It Works
 
-The preload library intercepts file operations (`open`, `stat`, `access`, `dlopen`) and uses a **local-first fallback** strategy:
+The preload library intercepts file operations (`open`, `fopen`, `stat`, `access`, `dlopen`, `opendir`) and uses a **local-first fallback** strategy:
 
 1. **Normal paths** → Try local filesystem first. If file not found (ENOENT), try remote.
 2. **`/host/` prefix** → Always fetch from remote (skips local).
@@ -54,7 +54,7 @@ This allows the same binary to work both standalone (local files) and with remot
 
 ### Shared Library Loading
 
-Shared libraries (`.so` files) are automatically cached locally when loaded, as the dynamic linker requires `mmap()` access.
+Shared libraries (`.so` files) are automatically cached locally when loaded, as the dynamic linker requires `mmap()` access. The cache persists across runs and is validated via mtime/size comparison with the remote—stale files are re-downloaded automatically.
 
 ```c
 // Tries local, falls back to remote (cached for mmap)
@@ -65,6 +65,18 @@ void* h = dlopen("/host/libs/myplugin.so", RTLD_NOW);
 ```
 
 For implicitly linked libraries, the runner sets `LD_LIBRARY_PATH=.` so libraries in the file-dir root are found via fallback.
+
+### Directory Listing
+
+Directory operations are supported for remote directories:
+
+```c
+DIR* d = opendir("plugins");
+while ((entry = readdir(d)) != NULL) {
+    printf("%s\n", entry->d_name);
+}
+closedir(d);
+```
 
 ### Limitations
 
