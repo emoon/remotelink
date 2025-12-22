@@ -64,7 +64,7 @@ void* h = dlopen("libs/myplugin.so", RTLD_NOW);
 void* h = dlopen("/host/libs/myplugin.so", RTLD_NOW);
 ```
 
-For implicitly linked libraries, the runner sets `LD_LIBRARY_PATH=/host/libs`.
+For implicitly linked libraries, the runner sets `LD_LIBRARY_PATH=.` so libraries in the file-dir root are found via fallback.
 
 ### Limitations
 

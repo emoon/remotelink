@@ -347,11 +347,11 @@ impl Context {
                 }
             }
 
-            // Set LD_LIBRARY_PATH to include /host/libs for implicit shared library loading
-            // This allows the dynamic linker to find libraries served from the host
+            // Set LD_LIBRARY_PATH to current directory for implicit shared library loading
+            // The fallback mechanism will fetch missing libraries from the remote file server
             let ld_library_path = std::env::var("LD_LIBRARY_PATH")
-                .map(|existing| format!("/host/libs:{}", existing))
-                .unwrap_or_else(|_| "/host/libs".to_string());
+                .map(|existing| format!(".:{}", existing))
+                .unwrap_or_else(|_| ".".to_string());
             cmd.env("LD_LIBRARY_PATH", &ld_library_path);
             info!("Setting LD_LIBRARY_PATH={}", ld_library_path);
         }
