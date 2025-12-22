@@ -22,6 +22,7 @@ simple_logger = "5.0"
 notify-debouncer-mini = "0.4"
 libc = "0.2"
 uuid = { version = "1.0", features = ["v4"] }
+goblin = "0.8"
 
 [dev-dependencies]
 tempfile = "3.8"

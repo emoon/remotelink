@@ -1,9 +1,11 @@
+use crate::file_client::FileServerClient;
 use crate::message_stream::{MessageStream, TransitionToRead};
 use crate::messages;
 use crate::messages::*;
 use crate::options::*;
 use anyhow::{anyhow, Context as AnyhowContext, Result};
 use core::result::Result::Ok;
+use goblin::elf::Elf;
 use log::{debug, error, info, trace, warn};
 use std::{
     fs::File,
@@ -25,6 +27,73 @@ use uuid::Uuid;
 use std::os::unix::fs::PermissionsExt;
 
 type IoOut = Receiver<Vec<u8>>;
+
+/// Parse an ELF binary and extract non-system library names from DT_NEEDED
+fn get_library_dependencies(elf_data: &[u8]) -> Vec<String> {
+    let elf = match Elf::parse(elf_data) {
+        Ok(e) => e,
+        Err(e) => {
+            warn!("Failed to parse ELF: {}", e);
+            return Vec::new();
+        }
+    };
+
+    elf.libraries
+        .iter()
+        .filter(|lib| {
+            // Skip standard system libraries
+            !lib.starts_with("libc.so")
+                && !lib.starts_with("libm.so")
+                && !lib.starts_with("libpthread.so")
+                && !lib.starts_with("libdl.so")
+                && !lib.starts_with("librt.so")
+                && !lib.starts_with("libgcc")
+                && !lib.starts_with("libstdc++")
+                && !lib.starts_with("ld-linux")
+        })
+        .map(|s| s.to_string())
+        .collect()
+}
+
+/// Pre-fetch library dependencies from file server to local directory
+fn prefetch_libraries(host_addr: &str, exe_data: &[u8], exe_dir: &PathBuf) {
+    let libs = get_library_dependencies(exe_data);
+
+    if libs.is_empty() {
+        debug!("No non-system library dependencies found");
+        return;
+    }
+
+    info!("Found {} library dependencies to check", libs.len());
+
+    let server_addr = format!("{}:8889", host_addr);
+    let client = match FileServerClient::new(&server_addr) {
+        Ok(c) => c,
+        Err(e) => {
+            warn!("Could not connect to file server: {}", e);
+            return;
+        }
+    };
+
+    for lib_name in libs {
+        let local_path = exe_dir.join(&lib_name);
+
+        // Skip if already exists locally
+        if local_path.exists() {
+            debug!("Library already cached: {}", lib_name);
+            continue;
+        }
+
+        // Try to fetch from file server
+        info!("Fetching library: {}", lib_name);
+        if let Err(e) = client.download_file(&lib_name, &local_path) {
+            // Not an error - library might be found via system paths
+            debug!("Could not fetch {}: error {}", lib_name, e);
+        } else {
+            info!("Downloaded {}", lib_name);
+        }
+    }
+}
 
 struct Context {
     /// Used for tracking running executable.
@@ -325,6 +394,20 @@ impl Context {
 
         // Set REMOTELINK_FILE_SERVER and LD_PRELOAD environment variables if file server is enabled
         if f.file_server {
+            // Pre-fetch library dependencies before launching
+            // Libraries are cached in the same directory as the executable
+            if let Some(exe_dir) = exe_path.parent() {
+                prefetch_libraries(&self.host_addr, f.data, &exe_dir.to_path_buf());
+
+                // Set LD_LIBRARY_PATH to include the temp directory where libs are cached
+                let exe_dir_str = exe_dir.to_string_lossy();
+                let ld_library_path = std::env::var("LD_LIBRARY_PATH")
+                    .map(|existing| format!("{}:{}", exe_dir_str, existing))
+                    .unwrap_or_else(|_| exe_dir_str.to_string());
+                cmd.env("LD_LIBRARY_PATH", &ld_library_path);
+                info!("Setting LD_LIBRARY_PATH={}", ld_library_path);
+            }
+
             // Use the host IP from the incoming connection for file server
             let file_server = format!("{}:8889", self.host_addr);
             cmd.env("REMOTELINK_FILE_SERVER", &file_server);
@@ -356,14 +439,6 @@ impl Context {
                     break;
                 }
             }
-
-            // Set LD_LIBRARY_PATH to current directory for implicit shared library loading
-            // The fallback mechanism will fetch missing libraries from the remote file server
-            let ld_library_path = std::env::var("LD_LIBRARY_PATH")
-                .map(|existing| format!(".:{}", existing))
-                .unwrap_or_else(|_| ".".to_string());
-            cmd.env("LD_LIBRARY_PATH", &ld_library_path);
-            info!("Setting LD_LIBRARY_PATH={}", ld_library_path);
         }
 
         // Spawn the executable

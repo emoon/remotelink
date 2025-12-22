@@ -1,3 +1,4 @@
+mod file_client;
 mod file_server;
 mod file_watcher;
 mod host;
