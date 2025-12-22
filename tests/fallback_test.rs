@@ -42,11 +42,7 @@ fn test_local_first_fallback() {
     // Compile test program
     let test_binary = local_dir.path().join("fallback_test");
     let compile_result = Command::new("gcc")
-        .args(&[
-            "tests/fallback_test.c",
-            "-o",
-            test_binary.to_str().unwrap(),
-        ])
+        .args(&["tests/fallback_test.c", "-o", test_binary.to_str().unwrap()])
         .output();
 
     match compile_result {
