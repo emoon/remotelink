@@ -75,9 +75,14 @@ fn cleanup() {
     let _ = std::fs::remove_dir_all(&cache_dir);
 }
 
-/// Check if a path should be handled remotely
+/// Check if a path should be handled remotely (explicit /host/ prefix)
 fn is_remote_path(path: &str) -> bool {
     path.starts_with("/host/")
+}
+
+/// Check if we have an active remote connection
+fn has_remote_connection() -> bool {
+    CONNECTION.lock().unwrap().is_some()
 }
 
 /// Get the relative path by stripping /host/ prefix

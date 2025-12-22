@@ -28,42 +28,47 @@ remotelink --target <remote-ip> --filename ./my_program --watch
 
 ## Remote File Loading
 
-Access files from the host machine transparently using the `/host/` prefix:
+Access files from the host machine transparently:
 
 ```bash
 # Enable file server
 remotelink --target <ip> --filename ./my_program --file-dir /path/to/data
 ```
 
+### How It Works
+
+The preload library intercepts file operations (`open`, `stat`, `access`, `dlopen`) and uses a **local-first fallback** strategy:
+
+1. **Normal paths** → Try local filesystem first. If file not found (ENOENT), try remote.
+2. **`/host/` prefix** → Always fetch from remote (skips local).
+
 ```c
-// In your program - reads from host machine
-FILE* f = fopen("/host/config.json", "rb");
+// Tries local first, falls back to remote if not found
+FILE* f = fopen("data/config.json", "rb");
+
+// Forces remote-only access
+FILE* f = fopen("/host/data/config.json", "rb");
 ```
+
+This allows the same binary to work both standalone (local files) and with remotelink (remote fallback).
 
 ### Shared Library Loading
 
-Remote shared libraries are also supported. Place libraries in `<file-dir>/libs/`:
-
-```
-my_project/
-  libs/
-    libcustom.so.1
-  data/
-    config.json
-```
-
-The runner automatically sets `LD_LIBRARY_PATH=/host/libs` so linked libraries are found.
-
-For `dlopen()`, use the `/host/` prefix directly:
+Shared libraries (`.so` files) are automatically cached locally when loaded, as the dynamic linker requires `mmap()` access.
 
 ```c
-void* handle = dlopen("/host/plugins/myplugin.so", RTLD_NOW);
+// Tries local, falls back to remote (cached for mmap)
+void* h = dlopen("libs/myplugin.so", RTLD_NOW);
+
+// Forces remote
+void* h = dlopen("/host/libs/myplugin.so", RTLD_NOW);
 ```
+
+For implicitly linked libraries, the runner sets `LD_LIBRARY_PATH=/host/libs`.
 
 ### Limitations
 
-- Read-only access only
-- Files must use `/host/` prefix
+- Read-only access
 - Requires `libremotelink_preload.so` on target (see Cross-Compilation)
 
 ## Command Line Options
