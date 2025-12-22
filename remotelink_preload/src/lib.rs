@@ -35,9 +35,10 @@ struct DirState {
     dirent: libc::dirent,
 }
 
-/// Get the cache directory path, including process ID to avoid conflicts
+/// Get the cache directory path
+/// Uses a fixed directory since mtime validation ensures cache freshness
 fn get_cache_dir() -> PathBuf {
-    PathBuf::from(format!("/tmp/remotelink-cache-{}", std::process::id()))
+    PathBuf::from("/tmp/remotelink-cache")
 }
 
 /// Initialize the library - called when library is loaded
@@ -77,16 +78,8 @@ fn cleanup() {
     // Close connection
     *CONNECTION.lock().unwrap() = None;
 
-    // Clean up cached shared library files
-    if let Some(cached) = CACHED_FILES.lock().unwrap().as_ref() {
-        for path in cached.iter() {
-            let _ = std::fs::remove_file(path);
-        }
-    }
-
-    // Try to remove the cache directory (will only succeed if empty)
-    let cache_dir = get_cache_dir();
-    let _ = std::fs::remove_dir_all(&cache_dir);
+    // Note: We intentionally don't delete cached files here
+    // The cache is shared across runs and validated via mtime
 }
 
 /// Check if a path should be handled remotely (explicit /host/ prefix)
@@ -110,7 +103,7 @@ pub(crate) fn get_relative_path(path: &str) -> &str {
 
 /// Check if a path refers to a shared library
 /// Matches: .so, .so.1, .so.1.2, .so.1.2.3, etc.
-fn is_shared_library(path: &str) -> bool {
+pub(crate) fn is_shared_library(path: &str) -> bool {
     // Check for exact .so extension
     if path.ends_with(".so") {
         return true;
@@ -197,14 +190,17 @@ pub(crate) fn cache_remote_file(path: &str) -> Option<PathBuf> {
     let cache_dir = get_cache_dir();
     let cache_path = cache_dir.join(rel_path);
 
-    // Check if already cached
-    {
-        let cached = CACHED_FILES.lock().unwrap();
-        if let Some(set) = cached.as_ref() {
-            if set.contains(&cache_path) && cache_path.exists() {
-                return Some(cache_path);
+    // Check if already cached and still valid
+    if cache_path.exists() {
+        if is_cache_valid(path, &cache_path) {
+            // Track in set if not already (for cleanup)
+            if let Some(set) = CACHED_FILES.lock().unwrap().as_mut() {
+                set.insert(cache_path.clone());
             }
+            return Some(cache_path);
         }
+        // Cache is stale, remove old file
+        let _ = std::fs::remove_file(&cache_path);
     }
 
     // Create parent directories
@@ -228,6 +224,42 @@ pub(crate) fn cache_remote_file(path: &str) -> Option<PathBuf> {
     }
 
     Some(cache_path)
+}
+
+/// Check if cached file is still valid by comparing mtime and size with remote
+fn is_cache_valid(remote_path: &str, cache_path: &PathBuf) -> bool {
+    // Get local file metadata
+    let local_meta = match std::fs::metadata(cache_path) {
+        Ok(m) => m,
+        Err(_) => return false,
+    };
+
+    let local_size = local_meta.len();
+    let local_mtime = local_meta
+        .modified()
+        .ok()
+        .and_then(|t| {
+            t.duration_since(std::time::SystemTime::UNIX_EPOCH)
+                .ok()
+                .map(|d| d.as_secs() as i64)
+        })
+        .unwrap_or(0);
+
+    // Get remote file metadata
+    let conn_guard = CONNECTION.lock().unwrap();
+    let conn = match conn_guard.as_ref() {
+        Some(c) => c,
+        None => return false,
+    };
+
+    let rel_path = get_relative_path(remote_path);
+    let (remote_size, remote_mtime, _is_dir) = match conn.stat(rel_path) {
+        Ok(stats) => stats,
+        Err(_) => return false,
+    };
+
+    // Cache is valid if size matches and remote isn't newer
+    local_size == remote_size && remote_mtime <= local_mtime
 }
 
 /// Handle remote open operation

@@ -312,6 +312,16 @@ pub unsafe extern "C" fn fopen(path: *const c_char, mode: *const c_char) -> *mut
 
     if use_remote {
         // Explicit /host/ path - use remote directly
+        // For shared libraries, use caching instead of streaming
+        if crate::is_shared_library(path_str) {
+            if let Some(cache_path) = crate::cache_remote_file(path_str) {
+                if let Some(cache_str) = cache_path.to_str() {
+                    if let Ok(c_path) = std::ffi::CString::new(cache_str) {
+                        return real_fopen(c_path.as_ptr(), mode);
+                    }
+                }
+            }
+        }
         return fopen_remote(path_str, mode);
     }
 
@@ -323,6 +333,16 @@ pub unsafe extern "C" fn fopen(path: *const c_char, mode: *const c_char) -> *mut
         }
         // Local failed, check if ENOENT and try remote
         if *libc::__errno_location() == libc::ENOENT {
+            // For shared libraries, use caching instead of streaming
+            if crate::is_shared_library(path_str) {
+                if let Some(cache_path) = crate::cache_remote_file(path_str) {
+                    if let Some(cache_str) = cache_path.to_str() {
+                        if let Ok(c_path) = std::ffi::CString::new(cache_str) {
+                            return real_fopen(c_path.as_ptr(), mode);
+                        }
+                    }
+                }
+            }
             let remote_result = fopen_remote(path_str, mode);
             if !remote_result.is_null() {
                 return remote_result;
