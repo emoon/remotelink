@@ -86,7 +86,7 @@ fn has_remote_connection() -> bool {
 }
 
 /// Get the relative path by stripping /host/ prefix
-fn get_relative_path(path: &str) -> &str {
+pub(crate) fn get_relative_path(path: &str) -> &str {
     if path.starts_with("/host/") {
         &path[6..]
     } else {
@@ -137,12 +137,48 @@ mod tests {
     }
 }
 
+/// Download a remote file's contents into memory
+/// Returns the file data or an errno on error
+pub(crate) fn download_remote_file(path: &str) -> Result<Vec<u8>, i32> {
+    let conn_guard = CONNECTION.lock().unwrap();
+    let conn = conn_guard.as_ref().ok_or(libc::ENOENT)?;
+
+    let rel_path = get_relative_path(path);
+
+    // Open the remote file
+    let (handle, size) = conn.open(rel_path)?;
+
+    // Download the entire file
+    let mut data = Vec::with_capacity(size as usize);
+    let mut offset = 0u64;
+    let chunk_size = 4 * 1024 * 1024u32; // 4MB chunks
+
+    while offset < size {
+        let to_read = std::cmp::min(chunk_size, (size - offset) as u32);
+        match conn.read(handle, offset, to_read) {
+            Ok(chunk) => {
+                if chunk.is_empty() {
+                    break;
+                }
+                offset += chunk.len() as u64;
+                data.extend(chunk);
+            }
+            Err(errno) => {
+                let _ = conn.close(handle);
+                return Err(errno);
+            }
+        }
+    }
+
+    // Close remote file
+    let _ = conn.close(handle);
+
+    Ok(data)
+}
+
 /// Cache a remote file locally and return the local path
 /// This is used for shared libraries which need to be mmap'd by the dynamic linker
-fn cache_remote_file(path: &str) -> Option<PathBuf> {
-    let conn_guard = CONNECTION.lock().unwrap();
-    let conn = conn_guard.as_ref()?;
-
+pub(crate) fn cache_remote_file(path: &str) -> Option<PathBuf> {
     let rel_path = get_relative_path(path);
     let cache_dir = get_cache_dir();
     let cache_path = cache_dir.join(rel_path);
@@ -164,36 +200,8 @@ fn cache_remote_file(path: &str) -> Option<PathBuf> {
         }
     }
 
-    // Open the remote file
-    let (handle, size) = match conn.open(rel_path) {
-        Ok(result) => result,
-        Err(_) => return None,
-    };
-
-    // Download the entire file
-    let mut data = Vec::with_capacity(size as usize);
-    let mut offset = 0u64;
-    let chunk_size = 4 * 1024 * 1024u32; // 4MB chunks
-
-    while offset < size {
-        let to_read = std::cmp::min(chunk_size, (size - offset) as u32);
-        match conn.read(handle, offset, to_read) {
-            Ok(chunk) => {
-                if chunk.is_empty() {
-                    break;
-                }
-                offset += chunk.len() as u64;
-                data.extend(chunk);
-            }
-            Err(_) => {
-                let _ = conn.close(handle);
-                return None;
-            }
-        }
-    }
-
-    // Close remote file
-    let _ = conn.close(handle);
+    // Download the file
+    let data = download_remote_file(path).ok()?;
 
     // Write to cache
     if std::fs::write(&cache_path, &data).is_err() {

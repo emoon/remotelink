@@ -258,6 +258,210 @@ pub unsafe extern "C" fn faccessat(
     )
 }
 
+/// Wrapper for fcntl() - needed for programs using open() syscall with virtual FDs
+#[no_mangle]
+pub unsafe extern "C" fn fcntl(fd: c_int, cmd: c_int, arg: c_int) -> c_int {
+    if is_virtual_fd(fd) {
+        // Handle fcntl commands that fdopen uses to validate the fd
+        match cmd {
+            libc::F_GETFL => {
+                // Return flags based on how the file was opened
+                // For simplicity, return O_RDONLY - most remote files are read-only
+                libc::O_RDONLY
+            }
+            libc::F_SETFL => {
+                // Accept but ignore flag changes
+                0
+            }
+            libc::F_GETFD => {
+                // Return close-on-exec flag (not set)
+                0
+            }
+            libc::F_SETFD => {
+                // Accept but ignore
+                0
+            }
+            _ => {
+                // Unknown command, return error
+                *libc::__errno_location() = libc::EINVAL;
+                -1
+            }
+        }
+    } else {
+        type FcntlFn = unsafe extern "C" fn(c_int, c_int, c_int) -> c_int;
+        let real_fcntl: FcntlFn = get_real_fn("fcntl");
+        real_fcntl(fd, cmd, arg)
+    }
+}
+
+/// Wrapper for fopen() - uses fopencookie for true streaming from remote
+#[no_mangle]
+pub unsafe extern "C" fn fopen(path: *const c_char, mode: *const c_char) -> *mut libc::FILE {
+    let Some(path_str) = path_to_str(path) else {
+        type FopenFn = unsafe extern "C" fn(*const c_char, *const c_char) -> *mut libc::FILE;
+        let real_fopen: FopenFn = get_real_fn("fopen");
+        return real_fopen(path, mode);
+    };
+
+    type FopenFn = unsafe extern "C" fn(*const c_char, *const c_char) -> *mut libc::FILE;
+    let real_fopen: FopenFn = get_real_fn("fopen");
+
+    // Check if this should use remote
+    let use_remote = crate::is_remote_path(path_str);
+    let try_fallback = !use_remote && crate::has_remote_connection();
+
+    if use_remote {
+        // Explicit /host/ path - use remote directly
+        return fopen_remote(path_str, mode);
+    }
+
+    if try_fallback {
+        // Try local first
+        let result = real_fopen(path, mode);
+        if !result.is_null() {
+            return result;
+        }
+        // Local failed, check if ENOENT and try remote
+        if *libc::__errno_location() == libc::ENOENT {
+            let remote_result = fopen_remote(path_str, mode);
+            if !remote_result.is_null() {
+                return remote_result;
+            }
+            // Restore ENOENT
+            *libc::__errno_location() = libc::ENOENT;
+        }
+        return result;
+    }
+
+    // No remote involvement
+    real_fopen(path, mode)
+}
+
+/// State for a remote file opened via fopencookie
+struct RemoteFileCookie {
+    handle: u32,
+    offset: u64,
+    size: u64,
+}
+
+/// fopencookie read callback - streams data from remote on demand
+unsafe extern "C" fn cookie_read(cookie: *mut c_void, buf: *mut c_char, size: usize) -> isize {
+    let cookie = &mut *(cookie as *mut RemoteFileCookie);
+
+    let conn_guard = crate::CONNECTION.lock().unwrap();
+    let conn = match conn_guard.as_ref() {
+        Some(c) => c,
+        None => return -1,
+    };
+
+    // Don't read past end of file
+    if cookie.offset >= cookie.size {
+        return 0;
+    }
+
+    let to_read = std::cmp::min(size as u64, cookie.size - cookie.offset) as u32;
+    match conn.read(cookie.handle, cookie.offset, to_read) {
+        Ok(data) => {
+            let bytes_read = data.len();
+            std::ptr::copy_nonoverlapping(data.as_ptr(), buf as *mut u8, bytes_read);
+            cookie.offset += bytes_read as u64;
+            bytes_read as isize
+        }
+        Err(_) => -1,
+    }
+}
+
+/// fopencookie seek callback
+unsafe extern "C" fn cookie_seek(cookie: *mut c_void, offset: *mut i64, whence: c_int) -> c_int {
+    let cookie = &mut *(cookie as *mut RemoteFileCookie);
+
+    let new_offset = match whence {
+        libc::SEEK_SET => *offset as u64,
+        libc::SEEK_CUR => (cookie.offset as i64 + *offset) as u64,
+        libc::SEEK_END => (cookie.size as i64 + *offset) as u64,
+        _ => return -1,
+    };
+
+    cookie.offset = new_offset;
+    *offset = new_offset as i64;
+    0
+}
+
+/// fopencookie close callback
+unsafe extern "C" fn cookie_close(cookie: *mut c_void) -> c_int {
+    let cookie = Box::from_raw(cookie as *mut RemoteFileCookie);
+
+    let conn_guard = crate::CONNECTION.lock().unwrap();
+    if let Some(conn) = conn_guard.as_ref() {
+        let _ = conn.close(cookie.handle);
+    }
+    0
+}
+
+/// Open a remote file and return a FILE* using fopencookie for true streaming
+unsafe fn fopen_remote(path: &str, mode: *const c_char) -> *mut libc::FILE {
+    let conn_guard = crate::CONNECTION.lock().unwrap();
+    let conn = match conn_guard.as_ref() {
+        Some(c) => c,
+        None => {
+            *libc::__errno_location() = libc::ENOENT;
+            return std::ptr::null_mut();
+        }
+    };
+
+    let rel_path = crate::get_relative_path(path);
+
+    // Open remote file to get handle and size
+    let (handle, size) = match conn.open(rel_path) {
+        Ok(result) => result,
+        Err(errno) => {
+            *libc::__errno_location() = errno;
+            return std::ptr::null_mut();
+        }
+    };
+    drop(conn_guard);
+
+    // Create cookie with file state
+    let cookie = Box::new(RemoteFileCookie {
+        handle,
+        offset: 0,
+        size,
+    });
+
+    // Set up fopencookie callbacks (read-only for now)
+    #[repr(C)]
+    struct CookieIoFunctions {
+        read: Option<unsafe extern "C" fn(*mut c_void, *mut c_char, usize) -> isize>,
+        write: Option<unsafe extern "C" fn(*mut c_void, *const c_char, usize) -> isize>,
+        seek: Option<unsafe extern "C" fn(*mut c_void, *mut i64, c_int) -> c_int>,
+        close: Option<unsafe extern "C" fn(*mut c_void) -> c_int>,
+    }
+
+    let funcs = CookieIoFunctions {
+        read: Some(cookie_read),
+        write: None, // Read-only
+        seek: Some(cookie_seek),
+        close: Some(cookie_close),
+    };
+
+    // Call fopencookie
+    type FopencookieFn =
+        unsafe extern "C" fn(*mut c_void, *const c_char, CookieIoFunctions) -> *mut libc::FILE;
+    let fopencookie: FopencookieFn = get_real_fn("fopencookie");
+
+    let file = fopencookie(Box::into_raw(cookie) as *mut c_void, mode, funcs);
+    if file.is_null() {
+        *libc::__errno_location() = libc::ENOMEM;
+    }
+    file
+}
+
+/// Wrapper for fopen64() - same as fopen on 64-bit systems
+#[no_mangle]
+pub unsafe extern "C" fn fopen64(path: *const c_char, mode: *const c_char) -> *mut libc::FILE {
+    fopen(path, mode)
+}
+
 /// Wrapper for dlopen() - intercept loading of shared libraries from /host/
 #[no_mangle]
 pub unsafe extern "C" fn dlopen(path: *const c_char, flags: c_int) -> *mut c_void {

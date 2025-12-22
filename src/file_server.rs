@@ -200,22 +200,31 @@ fn handle_file_client(mut stream: TcpStream, state: Arc<Mutex<FileServerState>>)
                 continue;
             }
             Err(e) => {
+                let err_str = e.to_string();
+                // WouldBlock is normal for non-blocking sockets - just continue
+                if err_str.contains("WouldBlock") {
+                    thread::sleep(Duration::from_millis(1));
+                    continue;
+                }
                 // Check if it's a clean disconnect
-                if e.to_string().contains("UnexpectedEof")
-                    || e.to_string().contains("Connection reset")
-                {
-                    debug!("File server: client {} disconnected", peer_addr);
+                if err_str.contains("UnexpectedEof") || err_str.contains("Connection reset") {
+                    debug!(
+                        "File server: client {} disconnected: {}",
+                        peer_addr, err_str
+                    );
                     return Ok(());
                 }
+                warn!("File server: error reading from {}: {}", peer_addr, e);
                 return Err(e).context("Failed to read message");
             }
         };
 
-        trace!("File server: received message {:?} from {}", msg, peer_addr);
+        info!("File server: received message {:?} from {}", msg, peer_addr);
 
         match msg {
             Messages::FileOpenRequest => {
                 let request: FileOpenRequest = bincode::deserialize(&msg_stream.data)?;
+                info!("File server: open request for path: {:?}", request.path);
 
                 let reply = match state.lock().unwrap().open_file(request.path) {
                     Ok((handle, size)) => FileOpenReply {

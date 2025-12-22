@@ -26,7 +26,6 @@ use std::os::unix::fs::PermissionsExt;
 
 type IoOut = Receiver<Vec<u8>>;
 
-#[derive(Default)]
 struct Context {
     /// Used for tracking running executable.
     stdout: Option<IoOut>,
@@ -36,6 +35,20 @@ struct Context {
     proc: Option<Child>,
     /// Path to the temporary executable file for cleanup
     temp_exe_path: Option<PathBuf>,
+    /// IP address of the host (for file server connection)
+    host_addr: String,
+}
+
+impl Context {
+    fn new(host_addr: String) -> Self {
+        Self {
+            stdout: None,
+            stderr: None,
+            proc: None,
+            temp_exe_path: None,
+            host_addr,
+        }
+    }
 }
 
 impl Context {
@@ -312,11 +325,8 @@ impl Context {
 
         // Set REMOTELINK_FILE_SERVER and LD_PRELOAD environment variables if file server is enabled
         if f.file_server {
-            // Get the host address from the environment or use localhost
-            // The host will be running the file server on port 8889
-            let file_server_addr =
-                std::env::var("REMOTELINK_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
-            let file_server = format!("{}:8889", file_server_addr);
+            // Use the host IP from the incoming connection for file server
+            let file_server = format!("{}:8889", self.host_addr);
             cmd.env("REMOTELINK_FILE_SERVER", &file_server);
             info!("Setting REMOTELINK_FILE_SERVER={}", file_server);
 
@@ -478,7 +488,9 @@ fn handle_client(stream: &mut TcpStream, opts: &Opt) -> Result<()> {
     msg_stream.begin_read(stream, false)?;
 
     // Setup a context so we can keep track of a running process and such
-    let mut context = Context::default();
+    // Extract the host IP from the peer address for file server connections
+    let host_ip = peer_addr.ip().to_string();
+    let mut context = Context::new(host_ip);
 
     loop {
         let msg = msg_stream.update(stream)?;
