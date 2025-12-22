@@ -322,17 +322,27 @@ impl Context {
 
             // Set LD_PRELOAD to enable file interception
             // Try common locations for the preload library
-            let preload_paths = vec![
-                "/usr/local/lib/libremotelink_preload.so",
-                "/usr/lib/libremotelink_preload.so",
-                "./target/release/libremotelink_preload.so",
-                "./target/debug/libremotelink_preload.so",
-            ];
+            let mut preload_paths: Vec<std::path::PathBuf> = Vec::new();
+
+            // First, check next to the executable
+            if let Ok(exe_path) = std::env::current_exe() {
+                if let Some(exe_dir) = exe_path.parent() {
+                    preload_paths.push(exe_dir.join("libremotelink_preload.so"));
+                }
+            }
+
+            // Then check system paths
+            preload_paths.extend([
+                "/usr/local/lib/libremotelink_preload.so".into(),
+                "/usr/lib/libremotelink_preload.so".into(),
+                "./target/release/libremotelink_preload.so".into(),
+                "./target/debug/libremotelink_preload.so".into(),
+            ]);
 
             for path in &preload_paths {
-                if std::path::Path::new(path).exists() {
+                if path.exists() {
                     cmd.env("LD_PRELOAD", path);
-                    info!("Setting LD_PRELOAD={}", path);
+                    info!("Setting LD_PRELOAD={}", path.display());
                     break;
                 }
             }
