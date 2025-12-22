@@ -212,7 +212,8 @@ fn handle_remote_open(path: &str, flags: c_int, mode: c_int) -> c_int {
             if let Some(path_str) = cache_path.to_str() {
                 if let Ok(c_path) = CString::new(path_str) {
                     // Call real open on the cached file
-                    type OpenFn = unsafe extern "C" fn(*const std::os::raw::c_char, c_int, c_int) -> c_int;
+                    type OpenFn =
+                        unsafe extern "C" fn(*const std::os::raw::c_char, c_int, c_int) -> c_int;
                     let real_open: OpenFn = unsafe { ffi::get_real_fn("open") };
                     return unsafe { real_open(c_path.as_ptr(), flags, mode) };
                 }
@@ -497,6 +498,28 @@ fn handle_remote_access(path: &str, _mode: c_int) -> c_int {
             -1
         }
     }
+}
+
+/// Handle remote dlopen operation
+/// Downloads the shared library to local cache and calls real dlopen on it
+fn handle_remote_dlopen(path: &str, flags: c_int) -> *mut std::os::raw::c_void {
+    // Cache the remote file locally
+    if let Some(cache_path) = cache_remote_file(path) {
+        if let Some(path_str) = cache_path.to_str() {
+            if let Ok(c_path) = CString::new(path_str) {
+                // Call real dlopen on the cached file
+                type DlopenFn = unsafe extern "C" fn(
+                    *const std::os::raw::c_char,
+                    c_int,
+                ) -> *mut std::os::raw::c_void;
+                let real_dlopen: DlopenFn = unsafe { ffi::get_real_fn("dlopen") };
+                return unsafe { real_dlopen(c_path.as_ptr(), flags) };
+            }
+        }
+    }
+
+    // Failed to cache, return null
+    std::ptr::null_mut()
 }
 
 // Constructor - called when library is loaded

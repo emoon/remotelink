@@ -274,3 +274,35 @@ pub unsafe extern "C" fn faccessat(
         real_faccessat(dirfd, path, mode, flags)
     }
 }
+
+/// Wrapper for dlopen() - intercept loading of shared libraries from /host/
+#[no_mangle]
+pub unsafe extern "C" fn dlopen(path: *const c_char, flags: c_int) -> *mut c_void {
+    // Handle null path (returns handle to main program)
+    if path.is_null() {
+        type DlopenFn = unsafe extern "C" fn(*const c_char, c_int) -> *mut c_void;
+        let real_dlopen: DlopenFn = get_real_fn("dlopen");
+        return real_dlopen(path, flags);
+    }
+
+    // Convert path to Rust string
+    let path_str = match CStr::from_ptr(path).to_str() {
+        Ok(s) => s,
+        Err(_) => {
+            // Invalid UTF-8, pass to real dlopen
+            type DlopenFn = unsafe extern "C" fn(*const c_char, c_int) -> *mut c_void;
+            let real_dlopen: DlopenFn = get_real_fn("dlopen");
+            return real_dlopen(path, flags);
+        }
+    };
+
+    // Check if this is a remote path
+    if crate::is_remote_path(path_str) {
+        crate::handle_remote_dlopen(path_str, flags)
+    } else {
+        // Call real dlopen
+        type DlopenFn = unsafe extern "C" fn(*const c_char, c_int) -> *mut c_void;
+        let real_dlopen: DlopenFn = get_real_fn("dlopen");
+        real_dlopen(path, flags)
+    }
+}
