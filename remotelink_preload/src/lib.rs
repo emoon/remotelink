@@ -212,7 +212,7 @@ fn handle_remote_open(path: &str, flags: c_int, mode: c_int) -> c_int {
             if let Some(path_str) = cache_path.to_str() {
                 if let Ok(c_path) = CString::new(path_str) {
                     // Call real open on the cached file
-                    type OpenFn = unsafe extern "C" fn(*const i8, c_int, c_int) -> c_int;
+                    type OpenFn = unsafe extern "C" fn(*const std::os::raw::c_char, c_int, c_int) -> c_int;
                     let real_open: OpenFn = unsafe { ffi::get_real_fn("open") };
                     return unsafe { real_open(c_path.as_ptr(), flags, mode) };
                 }
