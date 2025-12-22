@@ -2,23 +2,40 @@
 //
 // This library intercepts libc functions for files with the /host/ prefix and forwards
 // the operations to the file server over TCP.
+//
+// Shared libraries (.so files) are automatically cached locally to enable mmap() by the
+// dynamic linker.
 
 #![allow(non_camel_case_types)]
 
 mod fd_map;
 mod ffi;
 
-use std::sync::Mutex;
+use std::collections::HashSet;
+use std::ffi::CString;
 use std::os::raw::c_int;
+use std::path::PathBuf;
+use std::sync::Mutex;
 
 // Global state
 static FD_MAP: Mutex<Option<fd_map::FdMap>> = Mutex::new(None);
 static CONNECTION: Mutex<Option<remotelink_client::FileServerClient>> = Mutex::new(None);
 
+// Cache for shared libraries - these need to be real files for mmap() to work
+static CACHED_FILES: Mutex<Option<HashSet<PathBuf>>> = Mutex::new(None);
+
+/// Get the cache directory path, including process ID to avoid conflicts
+fn get_cache_dir() -> PathBuf {
+    PathBuf::from(format!("/tmp/remotelink-cache-{}", std::process::id()))
+}
+
 /// Initialize the library - called when library is loaded
 fn initialize() {
     // Initialize FD map
     *FD_MAP.lock().unwrap() = Some(fd_map::FdMap::new());
+
+    // Initialize cached files set
+    *CACHED_FILES.lock().unwrap() = Some(HashSet::new());
 
     // Initialize connection if REMOTELINK_FILE_SERVER is set
     if let Ok(addr) = std::env::var("REMOTELINK_FILE_SERVER") {
@@ -27,7 +44,10 @@ fn initialize() {
                 *CONNECTION.lock().unwrap() = Some(conn);
             }
             Err(e) => {
-                eprintln!("remotelink_preload: Failed to connect to file server {}: {}", addr, e);
+                eprintln!(
+                    "remotelink_preload: Failed to connect to file server {}: {}",
+                    addr, e
+                );
             }
         }
     }
@@ -42,6 +62,17 @@ fn cleanup() {
 
     // Close connection
     *CONNECTION.lock().unwrap() = None;
+
+    // Clean up cached shared library files
+    if let Some(cached) = CACHED_FILES.lock().unwrap().as_ref() {
+        for path in cached.iter() {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
+    // Try to remove the cache directory (will only succeed if empty)
+    let cache_dir = get_cache_dir();
+    let _ = std::fs::remove_dir_all(&cache_dir);
 }
 
 /// Check if a path should be handled remotely
@@ -58,8 +89,141 @@ fn get_relative_path(path: &str) -> &str {
     }
 }
 
+/// Check if a path refers to a shared library
+/// Matches: .so, .so.1, .so.1.2, .so.1.2.3, etc.
+fn is_shared_library(path: &str) -> bool {
+    // Check for exact .so extension
+    if path.ends_with(".so") {
+        return true;
+    }
+
+    // Check for versioned .so files like libfoo.so.1 or libfoo.so.1.2.3
+    if let Some(idx) = path.rfind(".so.") {
+        // Verify everything after .so. is digits and dots (version number)
+        let suffix = &path[idx + 4..];
+        if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit() || c == '.') {
+            return true;
+        }
+    }
+
+    false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_shared_library() {
+        // Positive cases
+        assert!(is_shared_library("/host/libs/libfoo.so"));
+        assert!(is_shared_library("/host/libs/libfoo.so.1"));
+        assert!(is_shared_library("/host/libs/libfoo.so.1.2"));
+        assert!(is_shared_library("/host/libs/libfoo.so.1.2.3"));
+        assert!(is_shared_library("libbar.so"));
+        assert!(is_shared_library("libc.so.6"));
+
+        // Negative cases
+        assert!(!is_shared_library("/host/data/file.txt"));
+        assert!(!is_shared_library("/host/data/file.json"));
+        assert!(!is_shared_library("/host/data/file.so.txt")); // Not a version number
+        assert!(!is_shared_library("/host/data/file.so.abc")); // Not digits
+        assert!(!is_shared_library("/host/data/myfile"));
+    }
+}
+
+/// Cache a remote file locally and return the local path
+/// This is used for shared libraries which need to be mmap'd by the dynamic linker
+fn cache_remote_file(path: &str) -> Option<PathBuf> {
+    let conn_guard = CONNECTION.lock().unwrap();
+    let conn = conn_guard.as_ref()?;
+
+    let rel_path = get_relative_path(path);
+    let cache_dir = get_cache_dir();
+    let cache_path = cache_dir.join(rel_path);
+
+    // Check if already cached
+    {
+        let cached = CACHED_FILES.lock().unwrap();
+        if let Some(set) = cached.as_ref() {
+            if set.contains(&cache_path) && cache_path.exists() {
+                return Some(cache_path);
+            }
+        }
+    }
+
+    // Create parent directories
+    if let Some(parent) = cache_path.parent() {
+        if std::fs::create_dir_all(parent).is_err() {
+            return None;
+        }
+    }
+
+    // Open the remote file
+    let (handle, size) = match conn.open(rel_path) {
+        Ok(result) => result,
+        Err(_) => return None,
+    };
+
+    // Download the entire file
+    let mut data = Vec::with_capacity(size as usize);
+    let mut offset = 0u64;
+    let chunk_size = 4 * 1024 * 1024u32; // 4MB chunks
+
+    while offset < size {
+        let to_read = std::cmp::min(chunk_size, (size - offset) as u32);
+        match conn.read(handle, offset, to_read) {
+            Ok(chunk) => {
+                if chunk.is_empty() {
+                    break;
+                }
+                offset += chunk.len() as u64;
+                data.extend(chunk);
+            }
+            Err(_) => {
+                let _ = conn.close(handle);
+                return None;
+            }
+        }
+    }
+
+    // Close remote file
+    let _ = conn.close(handle);
+
+    // Write to cache
+    if std::fs::write(&cache_path, &data).is_err() {
+        return None;
+    }
+
+    // Track cached file for cleanup
+    if let Some(set) = CACHED_FILES.lock().unwrap().as_mut() {
+        set.insert(cache_path.clone());
+    }
+
+    Some(cache_path)
+}
+
 /// Handle remote open operation
-fn handle_remote_open(path: &str, _flags: c_int, _mode: c_int) -> c_int {
+fn handle_remote_open(path: &str, flags: c_int, mode: c_int) -> c_int {
+    // For shared libraries, cache locally and return a real FD
+    // This allows the dynamic linker to mmap() the file
+    if is_shared_library(path) {
+        if let Some(cache_path) = cache_remote_file(path) {
+            if let Some(path_str) = cache_path.to_str() {
+                if let Ok(c_path) = CString::new(path_str) {
+                    // Call real open on the cached file
+                    type OpenFn = unsafe extern "C" fn(*const i8, c_int, c_int) -> c_int;
+                    let real_open: OpenFn = unsafe { ffi::get_real_fn("open") };
+                    return unsafe { real_open(c_path.as_ptr(), flags, mode) };
+                }
+            }
+        }
+        // Failed to cache, return error
+        unsafe { *libc::__errno_location() = libc::ENOENT };
+        return -1;
+    }
+
+    // For non-shared-library files, use virtual FD approach
     let conn_guard = CONNECTION.lock().unwrap();
     let conn = match conn_guard.as_ref() {
         Some(c) => c,
@@ -122,18 +286,16 @@ fn handle_remote_close(fd: c_int) -> c_int {
     };
 
     match map.get_handle(fd) {
-        Some(handle) => {
-            match conn.close(handle) {
-                Ok(()) => {
-                    map.release(fd);
-                    0
-                }
-                Err(errno) => {
-                    unsafe { *libc::__errno_location() = errno };
-                    -1
-                }
+        Some(handle) => match conn.close(handle) {
+            Ok(()) => {
+                map.release(fd);
+                0
             }
-        }
+            Err(errno) => {
+                unsafe { *libc::__errno_location() = errno };
+                -1
+            }
+        },
         None => {
             unsafe { *libc::__errno_location() = libc::EBADF };
             -1
@@ -308,6 +470,30 @@ fn handle_remote_fstat(fd: c_int, statbuf: *mut libc::stat) -> c_int {
         }
         _ => {
             unsafe { *libc::__errno_location() = libc::EBADF };
+            -1
+        }
+    }
+}
+
+/// Handle remote access operation
+/// Used by the dynamic linker to check if files exist before opening them
+fn handle_remote_access(path: &str, _mode: c_int) -> c_int {
+    let conn_guard = CONNECTION.lock().unwrap();
+    let conn = match conn_guard.as_ref() {
+        Some(c) => c,
+        None => {
+            unsafe { *libc::__errno_location() = libc::ENOENT };
+            return -1;
+        }
+    };
+
+    let rel_path = get_relative_path(path);
+
+    // Use stat to check if file exists
+    match conn.stat(rel_path) {
+        Ok(_) => 0, // File exists and is accessible
+        Err(errno) => {
+            unsafe { *libc::__errno_location() = errno };
             -1
         }
     }

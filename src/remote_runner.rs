@@ -4,7 +4,7 @@ use crate::messages::*;
 use crate::options::*;
 use anyhow::{anyhow, Context as AnyhowContext, Result};
 use core::result::Result::Ok;
-use log::{trace, error, info, warn, debug};
+use log::{debug, error, info, trace, warn};
 use std::{
     fs::File,
     io::{Read, Write},
@@ -12,9 +12,9 @@ use std::{
     path::PathBuf,
     process::{Child, Command, Stdio},
     sync::{
-        mpsc::{Receiver, Sender, channel},
-        Arc,
         atomic::{AtomicUsize, Ordering},
+        mpsc::{channel, Receiver, Sender},
+        Arc,
     },
     thread,
     time::Duration,
@@ -242,7 +242,7 @@ impl Context {
     where
         R: Read + Send + 'static,
     {
-        const IO_BUFFER_SIZE: usize = 4096;  // Standard page size for optimal performance
+        const IO_BUFFER_SIZE: usize = 4096; // Standard page size for optimal performance
         if let Err(e) = thread::Builder::new()
             .name("child_stream_to_vec".into())
             .spawn(move || loop {
@@ -295,13 +295,15 @@ impl Context {
         file.sync_all()
             .with_context(|| "Failed to sync executable to disk")?;
 
-        drop(file);  // Close file before executing
+        drop(file); // Close file before executing
 
         // Make executable (Unix only)
         #[cfg(unix)]
         {
             std::fs::set_permissions(&exe_path, std::fs::Permissions::from_mode(0o700))
-                .with_context(|| format!("Failed to set executable permissions on {:?}", exe_path))?;
+                .with_context(|| {
+                    format!("Failed to set executable permissions on {:?}", exe_path)
+                })?;
         }
 
         // Build command with environment variables
@@ -312,8 +314,8 @@ impl Context {
         if f.file_server {
             // Get the host address from the environment or use localhost
             // The host will be running the file server on port 8889
-            let file_server_addr = std::env::var("REMOTELINK_HOST")
-                .unwrap_or_else(|_| "127.0.0.1".to_string());
+            let file_server_addr =
+                std::env::var("REMOTELINK_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
             let file_server = format!("{}:8889", file_server_addr);
             cmd.env("REMOTELINK_FILE_SERVER", &file_server);
             info!("Setting REMOTELINK_FILE_SERVER={}", file_server);
@@ -334,6 +336,14 @@ impl Context {
                     break;
                 }
             }
+
+            // Set LD_LIBRARY_PATH to include /host/libs for implicit shared library loading
+            // This allows the dynamic linker to find libraries served from the host
+            let ld_library_path = std::env::var("LD_LIBRARY_PATH")
+                .map(|existing| format!("/host/libs:{}", existing))
+                .unwrap_or_else(|_| "/host/libs".to_string());
+            cmd.env("LD_LIBRARY_PATH", &ld_library_path);
+            info!("Setting LD_LIBRARY_PATH={}", ld_library_path);
         }
 
         // Spawn the executable
@@ -346,9 +356,13 @@ impl Context {
         let (stdout_tx, stdout_rx) = channel();
         let (stderr_tx, stderr_rx) = channel();
 
-        let stdout = p.stdout.take()
+        let stdout = p
+            .stdout
+            .take()
             .ok_or_else(|| anyhow::anyhow!("Failed to capture stdout"))?;
-        let stderr = p.stderr.take()
+        let stderr = p
+            .stderr
+            .take()
             .ok_or_else(|| anyhow::anyhow!("Failed to capture stderr"))?;
 
         Self::child_stream_to_vec(stdout, stdout_tx);
@@ -357,7 +371,7 @@ impl Context {
         self.stdout = Some(stdout_rx);
         self.stderr = Some(stderr_rx);
         self.proc = Some(p);
-        self.temp_exe_path = Some(exe_path);  // Store for cleanup
+        self.temp_exe_path = Some(exe_path); // Store for cleanup
 
         Ok(())
     }
@@ -385,12 +399,7 @@ fn send_output<S: Write + Read>(
     }
 
     let text_message = TextMessage { data: &data };
-    msg_stream.begin_write_message(
-        stream,
-        &text_message,
-        message_type,
-        TransitionToRead::Yes,
-    )?;
+    msg_stream.begin_write_message(stream, &text_message, message_type, TransitionToRead::Yes)?;
 
     Ok(())
 }
@@ -401,7 +410,12 @@ fn send_stdout<S: Write + Read>(
     msg_stream: &mut MessageStream,
     stream: &mut S,
 ) -> Result<()> {
-    send_output(context.stdout.as_mut(), msg_stream, stream, Messages::StdoutOutput)
+    send_output(
+        context.stdout.as_mut(),
+        msg_stream,
+        stream,
+        Messages::StdoutOutput,
+    )
 }
 
 /// Helper to send stderr data if available
@@ -410,7 +424,12 @@ fn send_stderr<S: Write + Read>(
     msg_stream: &mut MessageStream,
     stream: &mut S,
 ) -> Result<()> {
-    send_output(context.stderr.as_mut(), msg_stream, stream, Messages::StderrOutput)
+    send_output(
+        context.stderr.as_mut(),
+        msg_stream,
+        stream,
+        Messages::StderrOutput,
+    )
 }
 
 impl Drop for Context {
@@ -422,7 +441,8 @@ impl Drop for Context {
 }
 
 fn handle_client(stream: &mut TcpStream, opts: &Opt) -> Result<()> {
-    let peer_addr = stream.peer_addr()
+    let peer_addr = stream
+        .peer_addr()
         .unwrap_or_else(|_| "unknown:0".parse().unwrap());
 
     info!("Incoming connection from: {}", peer_addr);
@@ -434,7 +454,10 @@ fn handle_client(stream: &mut TcpStream, opts: &Opt) -> Result<()> {
         Duration::from_secs(opts.write_timeout_secs),
         Duration::from_secs(opts.keepalive_secs),
     ) {
-        error!("Failed to configure stream timeouts for {}: {}", peer_addr, e);
+        error!(
+            "Failed to configure stream timeouts for {}: {}",
+            peer_addr, e
+        );
         return Err(e);
     }
 
@@ -542,14 +565,17 @@ pub fn update(opts: &Opt) -> Result<()> {
                 }
 
                 // Accept connection
-                let peer_addr = stream.peer_addr()
+                let peer_addr = stream
+                    .peer_addr()
                     .unwrap_or_else(|_| "unknown:0".parse().unwrap());
 
                 // Increment counter
                 active_connections.fetch_add(1, Ordering::SeqCst);
                 let current = active_connections.load(Ordering::SeqCst);
-                info!("Connection accepted from {} ({}/{} active)",
-                      peer_addr, current, max_connections);
+                info!(
+                    "Connection accepted from {} ({}/{} active)",
+                    peer_addr, current, max_connections
+                );
 
                 // Clone counter for thread
                 let conn_counter = Arc::clone(&active_connections);

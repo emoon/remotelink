@@ -2,7 +2,10 @@ use std::ffi::CStr;
 use std::os::raw::{c_char, c_int, c_void};
 
 /// Get the original libc function using dlsym
-unsafe fn get_real_fn<F>(name: &str) -> F {
+///
+/// # Safety
+/// The caller must ensure F matches the actual function signature
+pub unsafe fn get_real_fn<F>(name: &str) -> F {
     let name_cstr = std::ffi::CString::new(name).unwrap();
     let ptr = libc::dlsym(libc::RTLD_NEXT, name_cstr.as_ptr());
     if ptr.is_null() {
@@ -41,6 +44,48 @@ pub unsafe extern "C" fn open(path: *const c_char, flags: c_int, mode: c_int) ->
 #[no_mangle]
 pub unsafe extern "C" fn open64(path: *const c_char, flags: c_int, mode: c_int) -> c_int {
     open(path, flags, mode)
+}
+
+/// Wrapper for openat() - used by modern glibc and the dynamic linker
+#[no_mangle]
+pub unsafe extern "C" fn openat(
+    dirfd: c_int,
+    path: *const c_char,
+    flags: c_int,
+    mode: c_int,
+) -> c_int {
+    // Convert path to Rust string
+    let path_str = match CStr::from_ptr(path).to_str() {
+        Ok(s) => s,
+        Err(_) => {
+            // Invalid UTF-8, pass to real openat
+            type OpenatFn = unsafe extern "C" fn(c_int, *const c_char, c_int, c_int) -> c_int;
+            let real_openat: OpenatFn = get_real_fn("openat");
+            return real_openat(dirfd, path, flags, mode);
+        }
+    };
+
+    // Check if this is a remote path
+    // For absolute paths starting with /host/, dirfd is ignored
+    if crate::is_remote_path(path_str) {
+        crate::handle_remote_open(path_str, flags, mode)
+    } else {
+        // Call real openat
+        type OpenatFn = unsafe extern "C" fn(c_int, *const c_char, c_int, c_int) -> c_int;
+        let real_openat: OpenatFn = get_real_fn("openat");
+        real_openat(dirfd, path, flags, mode)
+    }
+}
+
+/// Wrapper for openat64() - same as openat on 64-bit systems
+#[no_mangle]
+pub unsafe extern "C" fn openat64(
+    dirfd: c_int,
+    path: *const c_char,
+    flags: c_int,
+    mode: c_int,
+) -> c_int {
+    openat(dirfd, path, flags, mode)
 }
 
 /// Wrapper for close()
@@ -173,4 +218,59 @@ pub unsafe extern "C" fn fstat(fd: c_int, statbuf: *mut libc::stat) -> c_int {
 #[no_mangle]
 pub unsafe extern "C" fn fstat64(fd: c_int, statbuf: *mut libc::stat) -> c_int {
     fstat(fd, statbuf)
+}
+
+/// Wrapper for access() - used by dynamic linker to check file existence
+#[no_mangle]
+pub unsafe extern "C" fn access(path: *const c_char, mode: c_int) -> c_int {
+    // Convert path to Rust string
+    let path_str = match CStr::from_ptr(path).to_str() {
+        Ok(s) => s,
+        Err(_) => {
+            // Invalid UTF-8, pass to real access
+            type AccessFn = unsafe extern "C" fn(*const c_char, c_int) -> c_int;
+            let real_access: AccessFn = get_real_fn("access");
+            return real_access(path, mode);
+        }
+    };
+
+    // Check if this is a remote path
+    if crate::is_remote_path(path_str) {
+        crate::handle_remote_access(path_str, mode)
+    } else {
+        // Call real access
+        type AccessFn = unsafe extern "C" fn(*const c_char, c_int) -> c_int;
+        let real_access: AccessFn = get_real_fn("access");
+        real_access(path, mode)
+    }
+}
+
+/// Wrapper for faccessat() - used by some libc implementations
+#[no_mangle]
+pub unsafe extern "C" fn faccessat(
+    dirfd: c_int,
+    path: *const c_char,
+    mode: c_int,
+    flags: c_int,
+) -> c_int {
+    // Convert path to Rust string
+    let path_str = match CStr::from_ptr(path).to_str() {
+        Ok(s) => s,
+        Err(_) => {
+            // Invalid UTF-8, pass to real faccessat
+            type FaccessatFn = unsafe extern "C" fn(c_int, *const c_char, c_int, c_int) -> c_int;
+            let real_faccessat: FaccessatFn = get_real_fn("faccessat");
+            return real_faccessat(dirfd, path, mode, flags);
+        }
+    };
+
+    // Check if this is a remote path (absolute paths starting with /host/)
+    if crate::is_remote_path(path_str) {
+        crate::handle_remote_access(path_str, mode)
+    } else {
+        // Call real faccessat
+        type FaccessatFn = unsafe extern "C" fn(c_int, *const c_char, c_int, c_int) -> c_int;
+        let real_faccessat: FaccessatFn = get_real_fn("faccessat");
+        real_faccessat(dirfd, path, mode, flags)
+    }
 }

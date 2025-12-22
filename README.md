@@ -111,11 +111,78 @@ int main() {
 ### Supported Operations
 
 - `open()` / `open64()` - Open files for reading
+- `openat()` / `openat64()` - Open files (used by modern glibc)
 - `read()` - Read file contents
 - `close()` - Close files
 - `stat()` / `stat64()` - Get file metadata
 - `fstat()` / `fstat64()` - Get file metadata by descriptor
 - `lseek()` / `lseek64()` - Seek within files
+- `access()` / `faccessat()` - Check file accessibility
+
+### Remote Shared Library Loading
+
+Remotelink supports loading shared libraries (`.so` files) from the host machine. This works for both explicit `dlopen()` calls and implicit loading via the dynamic linker.
+
+#### How It Works
+
+When a shared library is opened from a `/host/` path:
+1. The library is automatically downloaded and cached locally in `/tmp/remotelink-cache-<pid>/`
+2. A real file descriptor is returned (not a virtual FD)
+3. The dynamic linker can `mmap()` the cached file normally
+4. Cached files are cleaned up when the process exits
+
+#### Implicit Loading (Linked Libraries)
+
+For libraries that are linked at compile time (not `dlopen()`), the runner automatically sets:
+
+```bash
+LD_LIBRARY_PATH=/host/libs:$LD_LIBRARY_PATH
+```
+
+This means if your executable is linked against `libcustom.so`, place it in `<file-dir>/libs/` on the host:
+
+```
+<file-dir>/
+  libs/
+    libcustom.so
+    libcustom.so.1
+```
+
+The dynamic linker will find and load these libraries transparently.
+
+#### Explicit Loading (dlopen)
+
+For `dlopen()` calls, use the `/host/` prefix directly:
+
+```c
+void *handle = dlopen("/host/plugins/myplugin.so", RTLD_NOW);
+```
+
+#### Example Setup
+
+**On the host machine:**
+
+```bash
+# Directory structure
+my_project/
+  libs/
+    libmylib.so.1
+  data/
+    config.json
+
+# Run with file server
+remotelink --target <ip> --filename ./my_program --file-dir my_project
+```
+
+**Your program (linked against libmylib.so.1):**
+
+```c
+// Library functions are available - loaded from /host/libs/
+my_library_function();
+
+// Data files also accessible
+FILE *f = fopen("/host/data/config.json", "r");
+```
 
 ### Limitations
 
