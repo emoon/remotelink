@@ -26,6 +26,8 @@ pub enum Messages {
     FileCloseReply = 14,
     FileStatRequest = 15,
     FileStatReply = 16,
+    FileReaddirRequest = 17,
+    FileReaddirReply = 18,
 }
 
 impl Messages {
@@ -50,6 +52,8 @@ impl Messages {
             14 => Ok(Messages::FileCloseReply),
             15 => Ok(Messages::FileStatRequest),
             16 => Ok(Messages::FileStatReply),
+            17 => Ok(Messages::FileReaddirRequest),
+            18 => Ok(Messages::FileReaddirReply),
             _ => Err(anyhow!("Invalid message type: {}", value)),
         }
     }
@@ -155,6 +159,31 @@ pub struct FileStatReply {
     pub size: u64,
     /// Last modification time (Unix timestamp)
     pub mtime: i64,
+    /// True if this is a directory
+    pub is_dir: bool,
+    /// Error code (0 = success, errno values for errors)
+    pub error: i32,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct FileReaddirRequest<'a> {
+    /// Path to directory relative to the file server's base directory
+    pub path: &'a str,
+}
+
+/// Directory entry info
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct DirEntry {
+    /// Entry name (file or directory name, not full path)
+    pub name: String,
+    /// True if this is a directory
+    pub is_dir: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct FileReaddirReply {
+    /// List of directory entries
+    pub entries: Vec<DirEntry>,
     /// Error code (0 = success, errno values for errors)
     pub error: i32,
 }

@@ -28,43 +28,101 @@ use std::os::unix::fs::PermissionsExt;
 
 type IoOut = Receiver<Vec<u8>>;
 
-/// Parse an ELF binary and extract non-system library names from DT_NEEDED
-fn get_library_dependencies(elf_data: &[u8]) -> Vec<String> {
+/// Parse ELF and extract library names and RUNPATH search paths
+/// Returns (libraries, relative_search_paths)
+fn parse_elf_libraries(elf_data: &[u8]) -> (Vec<String>, Vec<String>) {
     let elf = match Elf::parse(elf_data) {
         Ok(e) => e,
         Err(e) => {
             warn!("Failed to parse ELF: {}", e);
-            return Vec::new();
+            return (Vec::new(), Vec::new());
         }
     };
 
-    elf.libraries
+    let libraries: Vec<String> = elf.libraries.iter().map(|s| s.to_string()).collect();
+
+    // Get RUNPATH entries (or RPATH as fallback), split by ':'
+    let search_paths: Vec<&str> = if !elf.runpaths.is_empty() {
+        elf.runpaths.iter().flat_map(|p| p.split(':')).collect()
+    } else if !elf.rpaths.is_empty() {
+        elf.rpaths.iter().flat_map(|p| p.split(':')).collect()
+    } else {
+        Vec::new()
+    };
+
+    // Filter out empty paths
+    let search_paths: Vec<&str> = search_paths.into_iter().filter(|p| !p.is_empty()).collect();
+
+    if search_paths.is_empty() {
+        return (libraries, Vec::new());
+    }
+
+    // Find common prefix among search paths to compute relative paths
+    // The common prefix is the longest path that is a prefix of all search paths
+    let mut common_prefix = search_paths[0];
+    for path in &search_paths[1..] {
+        // Find character-by-character common part
+        let common_len = common_prefix
+            .chars()
+            .zip(path.chars())
+            .take_while(|(a, b)| a == b)
+            .count();
+        common_prefix = &common_prefix[..common_len];
+    }
+
+    // Ensure common prefix ends at a directory boundary
+    // If it doesn't end with '/', trim to last '/'
+    let common_prefix = if common_prefix.ends_with('/') {
+        common_prefix
+    } else {
+        // Check if we're at a full directory (shorter path equals common prefix)
+        // In that case, add trailing slash
+        if search_paths.iter().any(|p| *p == common_prefix) {
+            // One of the paths equals the common prefix, so it's a directory
+            // We need to include the trailing slash
+            Box::leak(format!("{}/", common_prefix).into_boxed_str()) as &str
+        } else {
+            // Trim to last slash
+            common_prefix
+                .rfind('/')
+                .map(|i| &common_prefix[..=i])
+                .unwrap_or("")
+        }
+    };
+
+    // Convert to relative paths
+    let relative_paths: Vec<String> = search_paths
         .iter()
-        .filter(|lib| {
-            // Skip standard system libraries
-            !lib.starts_with("libc.so")
-                && !lib.starts_with("libm.so")
-                && !lib.starts_with("libpthread.so")
-                && !lib.starts_with("libdl.so")
-                && !lib.starts_with("librt.so")
-                && !lib.starts_with("libgcc")
-                && !lib.starts_with("libstdc++")
-                && !lib.starts_with("ld-linux")
+        .map(|p| {
+            // Handle case where path equals common prefix (without trailing slash)
+            let common_no_slash = common_prefix.trim_end_matches('/');
+            if *p == common_no_slash {
+                String::new() // Root of file server
+            } else {
+                p.strip_prefix(common_prefix).unwrap_or(p).to_string()
+            }
         })
-        .map(|s| s.to_string())
-        .collect()
+        .collect();
+
+    debug!("RUNPATH relative paths: {:?}", relative_paths);
+
+    (libraries, relative_paths)
 }
 
 /// Pre-fetch library dependencies from file server to local directory
 fn prefetch_libraries(host_addr: &str, exe_data: &[u8], exe_dir: &PathBuf) {
-    let libs = get_library_dependencies(exe_data);
+    let (libraries, search_paths) = parse_elf_libraries(exe_data);
 
-    if libs.is_empty() {
-        debug!("No non-system library dependencies found");
+    if libraries.is_empty() || search_paths.is_empty() {
+        debug!("No libraries or search paths found");
         return;
     }
 
-    info!("Found {} library dependencies to check", libs.len());
+    info!(
+        "Found {} libraries, {} search paths",
+        libraries.len(),
+        search_paths.len()
+    );
 
     let server_addr = format!("{}:8889", host_addr);
     let client = match FileServerClient::new(&server_addr) {
@@ -75,8 +133,8 @@ fn prefetch_libraries(host_addr: &str, exe_data: &[u8], exe_dir: &PathBuf) {
         }
     };
 
-    for lib_name in libs {
-        let local_path = exe_dir.join(&lib_name);
+    for lib_name in &libraries {
+        let local_path = exe_dir.join(lib_name);
 
         // Skip if already exists locally
         if local_path.exists() {
@@ -84,13 +142,25 @@ fn prefetch_libraries(host_addr: &str, exe_data: &[u8], exe_dir: &PathBuf) {
             continue;
         }
 
-        // Try to fetch from file server
-        info!("Fetching library: {}", lib_name);
-        if let Err(e) = client.download_file(&lib_name, &local_path) {
-            // Not an error - library might be found via system paths
-            debug!("Could not fetch {}: error {}", lib_name, e);
-        } else {
-            info!("Downloaded {}", lib_name);
+        // Try each search path until we find the library
+        for search_path in &search_paths {
+            let remote_path = if search_path.is_empty() {
+                lib_name.clone()
+            } else {
+                format!("{}/{}", search_path, lib_name)
+            };
+
+            // First check if file exists on server (stat is cheaper than download attempt)
+            if client.stat(&remote_path).is_err() {
+                trace!("Library not found at: {}", remote_path);
+                continue;
+            }
+
+            debug!("Found library at: {}, downloading...", remote_path);
+            if client.download_file(&remote_path, &local_path).is_ok() {
+                info!("Downloaded {} from {}", lib_name, remote_path);
+                break;
+            }
         }
     }
 }

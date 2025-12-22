@@ -71,6 +71,11 @@ impl FileServerState {
 
         let path = self.validate_path(rel_path)?;
 
+        // Check if path is a directory - don't allow opening directories as files
+        if path.is_dir() {
+            return Err(anyhow!("Cannot open directory as file: {:?}", path));
+        }
+
         let file = File::open(&path).with_context(|| format!("Failed to open file: {:?}", path))?;
 
         let size = file
@@ -157,7 +162,8 @@ impl FileServerState {
     }
 
     /// Gets file statistics
-    fn stat_file(&self, rel_path: &str) -> Result<(u64, i64)> {
+    /// Returns (size, mtime, is_dir)
+    fn stat_file(&self, rel_path: &str) -> Result<(u64, i64, bool)> {
         let path = self.validate_path(rel_path)?;
 
         let metadata =
@@ -170,8 +176,26 @@ impl FileServerState {
             .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0);
+        let is_dir = metadata.is_dir();
 
-        Ok((size, mtime))
+        Ok((size, mtime, is_dir))
+    }
+
+    /// Reads directory entries
+    fn read_dir(&self, rel_path: &str) -> Result<Vec<crate::messages::DirEntry>> {
+        let path = self.validate_path(rel_path)?;
+
+        let mut entries = Vec::new();
+        for entry in std::fs::read_dir(&path)
+            .with_context(|| format!("Failed to read directory: {:?}", path))?
+        {
+            let entry = entry?;
+            let name = entry.file_name().to_string_lossy().to_string();
+            let is_dir = entry.file_type()?.is_dir();
+            entries.push(crate::messages::DirEntry { name, is_dir });
+        }
+
+        Ok(entries)
     }
 }
 
@@ -183,9 +207,10 @@ fn handle_file_client(mut stream: TcpStream, state: Arc<Mutex<FileServerState>>)
 
     info!("File server: connection from {}", peer_addr);
 
-    // Set timeouts
+    // Set timeouts and disable Nagle for faster responses
     stream.set_read_timeout(Some(Duration::from_secs(30)))?;
     stream.set_write_timeout(Some(Duration::from_secs(30)))?;
+    stream.set_nodelay(true)?;
     stream.set_nonblocking(true)?;
 
     let mut msg_stream = MessageStream::new();
@@ -233,7 +258,7 @@ fn handle_file_client(mut stream: TcpStream, state: Arc<Mutex<FileServerState>>)
                         error: 0,
                     },
                     Err(e) => {
-                        warn!("File server: failed to open {:?}: {}", request.path, e);
+                        debug!("File server: file not found {:?}: {}", request.path, e);
                         FileOpenReply {
                             handle: 0,
                             size: 0,
@@ -315,16 +340,18 @@ fn handle_file_client(mut stream: TcpStream, state: Arc<Mutex<FileServerState>>)
                 let request: FileStatRequest = bincode::deserialize(&msg_stream.data)?;
 
                 let reply = match state.lock().unwrap().stat_file(request.path) {
-                    Ok((size, mtime)) => FileStatReply {
+                    Ok((size, mtime, is_dir)) => FileStatReply {
                         size,
                         mtime,
+                        is_dir,
                         error: 0,
                     },
                     Err(e) => {
-                        warn!("File server: failed to stat {:?}: {}", request.path, e);
+                        debug!("File server: stat failed {:?}: {}", request.path, e);
                         FileStatReply {
                             size: 0,
                             mtime: 0,
+                            is_dir: false,
                             error: libc::ENOENT, // File not found
                         }
                     }
@@ -334,6 +361,29 @@ fn handle_file_client(mut stream: TcpStream, state: Arc<Mutex<FileServerState>>)
                     &mut stream,
                     &reply,
                     Messages::FileStatReply,
+                    TransitionToRead::Yes,
+                )?;
+            }
+
+            Messages::FileReaddirRequest => {
+                let request: FileReaddirRequest = bincode::deserialize(&msg_stream.data)?;
+                debug!("File server: readdir request for path: {:?}", request.path);
+
+                let reply = match state.lock().unwrap().read_dir(request.path) {
+                    Ok(entries) => FileReaddirReply { entries, error: 0 },
+                    Err(e) => {
+                        debug!("File server: readdir failed {:?}: {}", request.path, e);
+                        FileReaddirReply {
+                            entries: Vec::new(),
+                            error: libc::ENOENT,
+                        }
+                    }
+                };
+
+                msg_stream.begin_write_message(
+                    &mut stream,
+                    &reply,
+                    Messages::FileReaddirReply,
                     TransitionToRead::Yes,
                 )?;
             }

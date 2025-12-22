@@ -498,3 +498,68 @@ pub unsafe extern "C" fn dlopen(path: *const c_char, flags: c_int) -> *mut c_voi
 
     result
 }
+
+/// Wrapper for opendir()
+#[no_mangle]
+pub unsafe extern "C" fn opendir(path: *const c_char) -> *mut libc::DIR {
+    let Some(path_str) = path_to_str(path) else {
+        type OpendirFn = unsafe extern "C" fn(*const c_char) -> *mut libc::DIR;
+        let real_opendir: OpendirFn = get_real_fn("opendir");
+        return real_opendir(path);
+    };
+
+    // If path starts with /host/, always use remote
+    if crate::is_remote_path(path_str) {
+        return crate::handle_remote_opendir(path_str);
+    }
+
+    // Try local first
+    type OpendirFn = unsafe extern "C" fn(*const c_char) -> *mut libc::DIR;
+    let real_opendir: OpendirFn = get_real_fn("opendir");
+    let result = real_opendir(path);
+
+    // If local failed with ENOENT and we have a remote connection, try remote
+    if result.is_null()
+        && *libc::__errno_location() == libc::ENOENT
+        && crate::has_remote_connection()
+    {
+        let remote_result = crate::handle_remote_opendir(path_str);
+        if !remote_result.is_null() {
+            return remote_result;
+        }
+        // Restore ENOENT
+        *libc::__errno_location() = libc::ENOENT;
+    }
+
+    result
+}
+
+/// Wrapper for readdir()
+#[no_mangle]
+pub unsafe extern "C" fn readdir(dir: *mut libc::DIR) -> *mut libc::dirent {
+    if crate::is_virtual_dir(dir) {
+        crate::handle_remote_readdir(dir)
+    } else {
+        type ReaddirFn = unsafe extern "C" fn(*mut libc::DIR) -> *mut libc::dirent;
+        let real_readdir: ReaddirFn = get_real_fn("readdir");
+        real_readdir(dir)
+    }
+}
+
+/// Wrapper for readdir64() - same as readdir on 64-bit systems
+#[no_mangle]
+pub unsafe extern "C" fn readdir64(dir: *mut libc::DIR) -> *mut libc::dirent {
+    readdir(dir)
+}
+
+/// Wrapper for closedir()
+#[no_mangle]
+pub unsafe extern "C" fn closedir(dir: *mut libc::DIR) -> c_int {
+    if crate::is_virtual_dir(dir) {
+        crate::handle_remote_closedir(dir)
+    } else {
+        type ClosedirFn = unsafe extern "C" fn(*mut libc::DIR) -> c_int;
+        let real_closedir: ClosedirFn = get_real_fn("closedir");
+        real_closedir(dir)
+    }
+}

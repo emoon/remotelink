@@ -23,6 +23,7 @@ impl FileServerClient {
 
         stream.set_read_timeout(Some(Duration::from_secs(30)))?;
         stream.set_write_timeout(Some(Duration::from_secs(30)))?;
+        stream.set_nodelay(true)?; // Disable Nagle's algorithm for faster small packets
 
         let msg_stream = MessageStream::new();
 
@@ -134,8 +135,8 @@ impl FileServerClient {
     }
 
     /// Get file stats from the server
-    /// Returns (size, mtime) on success, or errno on error
-    pub fn stat(&self, path: &str) -> Result<(u64, i64), i32> {
+    /// Returns (size, mtime, is_dir) on success, or errno on error
+    pub fn stat(&self, path: &str) -> Result<(u64, i64, bool), i32> {
         let request = FileStatRequest { path };
 
         self.send_request_and_wait(
@@ -149,7 +150,29 @@ impl FileServerClient {
                     return Err(reply.error);
                 }
 
-                Ok((reply.size, reply.mtime))
+                Ok((reply.size, reply.mtime, reply.is_dir))
+            },
+        )
+    }
+
+    /// Read directory entries from the server
+    /// Returns list of directory entries on success, or errno on error
+    #[allow(dead_code)] // Used by remotelink_preload through remotelink_client crate
+    pub fn readdir(&self, path: &str) -> Result<Vec<DirEntry>, i32> {
+        let request = FileReaddirRequest { path };
+
+        self.send_request_and_wait(
+            &request,
+            Messages::FileReaddirRequest,
+            Messages::FileReaddirReply,
+            |data| {
+                let reply: FileReaddirReply = bincode::deserialize(data).map_err(|_| libc::EIO)?;
+
+                if reply.error != 0 {
+                    return Err(reply.error);
+                }
+
+                Ok(reply.entries)
             },
         )
     }
@@ -162,7 +185,7 @@ impl FileServerClient {
         // Read in chunks
         let mut data = Vec::with_capacity(size as usize);
         let mut offset = 0u64;
-        const CHUNK_SIZE: u32 = 64 * 1024;
+        const CHUNK_SIZE: u32 = 512 * 1024; // 512KB chunks for faster downloads
 
         while offset < size {
             let to_read = std::cmp::min(CHUNK_SIZE, (size - offset) as u32);

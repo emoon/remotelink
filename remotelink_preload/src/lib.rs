@@ -11,7 +11,7 @@
 mod fd_map;
 mod ffi;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ffi::CString;
 use std::os::raw::c_int;
 use std::path::PathBuf;
@@ -23,6 +23,17 @@ static CONNECTION: Mutex<Option<remotelink_client::FileServerClient>> = Mutex::n
 
 // Cache for shared libraries - these need to be real files for mmap() to work
 static CACHED_FILES: Mutex<Option<HashSet<PathBuf>>> = Mutex::new(None);
+
+// Directory state for opendir/readdir emulation
+// Maps DIR* pointer value to (entries, current_index)
+static DIR_STATE: Mutex<Option<HashMap<usize, DirState>>> = Mutex::new(None);
+
+struct DirState {
+    entries: Vec<remotelink_client::DirEntry>,
+    index: usize,
+    // Pre-allocated dirent for readdir to return
+    dirent: libc::dirent,
+}
 
 /// Get the cache directory path, including process ID to avoid conflicts
 fn get_cache_dir() -> PathBuf {
@@ -36,6 +47,9 @@ fn initialize() {
 
     // Initialize cached files set
     *CACHED_FILES.lock().unwrap() = Some(HashSet::new());
+
+    // Initialize directory state map
+    *DIR_STATE.lock().unwrap() = Some(HashMap::new());
 
     // Initialize connection if REMOTELINK_FILE_SERVER is set
     if let Ok(addr) = std::env::var("REMOTELINK_FILE_SERVER") {
@@ -440,7 +454,7 @@ fn handle_remote_stat(path: &str, statbuf: *mut libc::stat) -> c_int {
     let rel_path = get_relative_path(path);
 
     match conn.stat(rel_path) {
-        Ok((size, mtime)) => {
+        Ok((size, mtime, is_dir)) => {
             unsafe {
                 // Zero out the stat buffer
                 std::ptr::write_bytes(statbuf, 0, 1);
@@ -448,7 +462,12 @@ fn handle_remote_stat(path: &str, statbuf: *mut libc::stat) -> c_int {
                 // Fill in the fields we have
                 (*statbuf).st_size = size as i64;
                 (*statbuf).st_mtime = mtime;
-                (*statbuf).st_mode = libc::S_IFREG | 0o644; // Regular file, readable
+                // Set mode based on whether it's a directory or file
+                (*statbuf).st_mode = if is_dir {
+                    libc::S_IFDIR | 0o755 // Directory, readable and executable
+                } else {
+                    libc::S_IFREG | 0o644 // Regular file, readable
+                };
             }
             0
         }
@@ -533,6 +552,119 @@ fn handle_remote_dlopen(path: &str, flags: c_int) -> *mut std::os::raw::c_void {
 
     // Failed to cache, return null
     std::ptr::null_mut()
+}
+
+/// Handle remote opendir operation
+pub(crate) fn handle_remote_opendir(path: &str) -> *mut libc::DIR {
+    let conn_guard = CONNECTION.lock().unwrap();
+    let conn = match conn_guard.as_ref() {
+        Some(c) => c,
+        None => {
+            unsafe { *libc::__errno_location() = libc::ENOENT };
+            return std::ptr::null_mut();
+        }
+    };
+
+    let rel_path = get_relative_path(path);
+
+    match conn.readdir(rel_path) {
+        Ok(entries) => {
+            drop(conn_guard);
+
+            // Create a fake DIR pointer using Box
+            let fake_dir = Box::new(0u8);
+            let dir_ptr = Box::into_raw(fake_dir) as *mut libc::DIR;
+
+            // Store the directory state
+            let state = DirState {
+                entries,
+                index: 0,
+                dirent: unsafe { std::mem::zeroed() },
+            };
+
+            if let Some(map) = DIR_STATE.lock().unwrap().as_mut() {
+                map.insert(dir_ptr as usize, state);
+            }
+
+            dir_ptr
+        }
+        Err(errno) => {
+            unsafe { *libc::__errno_location() = errno };
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Check if a DIR* is one we're tracking
+pub(crate) fn is_virtual_dir(dir: *mut libc::DIR) -> bool {
+    if let Some(map) = DIR_STATE.lock().unwrap().as_ref() {
+        map.contains_key(&(dir as usize))
+    } else {
+        false
+    }
+}
+
+/// Handle remote readdir operation
+pub(crate) fn handle_remote_readdir(dir: *mut libc::DIR) -> *mut libc::dirent {
+    let mut state_guard = DIR_STATE.lock().unwrap();
+    let state_map = match state_guard.as_mut() {
+        Some(m) => m,
+        None => return std::ptr::null_mut(),
+    };
+
+    let state = match state_map.get_mut(&(dir as usize)) {
+        Some(s) => s,
+        None => return std::ptr::null_mut(),
+    };
+
+    if state.index >= state.entries.len() {
+        return std::ptr::null_mut();
+    }
+
+    let entry = &state.entries[state.index];
+    state.index += 1;
+
+    state.dirent.d_ino = 1;
+    state.dirent.d_off = state.index as i64;
+    state.dirent.d_reclen = std::mem::size_of::<libc::dirent>() as u16;
+    state.dirent.d_type = if entry.is_dir {
+        libc::DT_DIR
+    } else {
+        libc::DT_REG
+    };
+
+    let name_bytes = entry.name.as_bytes();
+    let max_len = state.dirent.d_name.len() - 1;
+    let copy_len = std::cmp::min(name_bytes.len(), max_len);
+
+    // Zero out the name buffer - cast to handle platform differences (i8 vs u8)
+    unsafe {
+        std::ptr::write_bytes(
+            state.dirent.d_name.as_mut_ptr(),
+            0,
+            state.dirent.d_name.len(),
+        );
+        std::ptr::copy_nonoverlapping(
+            name_bytes.as_ptr(),
+            state.dirent.d_name.as_mut_ptr() as *mut u8,
+            copy_len,
+        );
+    }
+
+    &mut state.dirent as *mut libc::dirent
+}
+
+/// Handle remote closedir operation
+pub(crate) fn handle_remote_closedir(dir: *mut libc::DIR) -> c_int {
+    let mut state_guard = DIR_STATE.lock().unwrap();
+    if let Some(state_map) = state_guard.as_mut() {
+        if state_map.remove(&(dir as usize)).is_some() {
+            let _ = unsafe { Box::from_raw(dir as *mut u8) };
+            return 0;
+        }
+    }
+    unsafe { *libc::__errno_location() = libc::EBADF };
+    -1
 }
 
 // Constructor - called when library is loaded
