@@ -15,6 +15,7 @@ pub struct FileServerClient {
     msg_stream: RefCell<MessageStream>,
 }
 
+#[allow(dead_code)] // Used by integration tests
 impl FileServerClient {
     /// Create a new connection to the file server
     pub fn new(addr: &str) -> Result<Self> {
