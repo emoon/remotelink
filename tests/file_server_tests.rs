@@ -55,8 +55,9 @@ fn test_file_server_stat() {
     let client = FileServerClient::new(&format!("127.0.0.1:{}", PORT_TEST_2)).unwrap();
 
     // Test: Stat file
-    let (size, _mtime) = client.stat("stat_test.txt").unwrap();
+    let (size, _mtime, is_dir) = client.stat("stat_test.txt").unwrap();
     assert_eq!(size, 18);
+    assert!(!is_dir);
 
     drop(client);
     drop(server_handle);

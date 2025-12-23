@@ -28,6 +28,8 @@ pub enum Messages {
     FileStatReply = 16,
     FileReaddirRequest = 17,
     FileReaddirReply = 18,
+    LibraryDataRequest = 19,
+    LibraryDataReply = 20,
 }
 
 impl Messages {
@@ -54,6 +56,8 @@ impl Messages {
             16 => Ok(Messages::FileStatReply),
             17 => Ok(Messages::FileReaddirRequest),
             18 => Ok(Messages::FileReaddirReply),
+            19 => Ok(Messages::LibraryDataRequest),
+            20 => Ok(Messages::LibraryDataReply),
             _ => Err(anyhow!("Invalid message type: {}", value)),
         }
     }
@@ -188,6 +192,24 @@ pub struct FileReaddirReply {
     pub error: i32,
 }
 
+// Library prefetch protocol messages
+
+/// Host sends library data
+#[derive(Serialize, Deserialize, Debug)]
+pub struct LibraryDataRequest<'a> {
+    /// Library filename
+    pub name: &'a str,
+    /// Library binary data
+    pub data: &'a [u8],
+}
+
+/// Remote acknowledges library received
+#[derive(Serialize, Deserialize, Debug)]
+pub struct LibraryDataReply {
+    /// 0 = success, non-zero = error
+    pub error: i32,
+}
+
 #[allow(dead_code)]
 #[derive(Copy, Clone)]
 pub struct Header {
@@ -294,12 +316,28 @@ mod tests {
             Messages::from_u8(16).unwrap(),
             Messages::FileStatReply
         ));
+        assert!(matches!(
+            Messages::from_u8(17).unwrap(),
+            Messages::FileReaddirRequest
+        ));
+        assert!(matches!(
+            Messages::from_u8(18).unwrap(),
+            Messages::FileReaddirReply
+        ));
+        assert!(matches!(
+            Messages::from_u8(19).unwrap(),
+            Messages::LibraryDataRequest
+        ));
+        assert!(matches!(
+            Messages::from_u8(20).unwrap(),
+            Messages::LibraryDataReply
+        ));
     }
 
     #[test]
     fn test_from_u8_invalid_messages() {
-        // Test various invalid values
-        assert!(Messages::from_u8(17).is_err());
+        // Test various invalid values (valid range is 0-20)
+        assert!(Messages::from_u8(21).is_err());
         assert!(Messages::from_u8(100).is_err());
         assert!(Messages::from_u8(255).is_err());
     }
@@ -393,12 +431,14 @@ mod tests {
         let reply = FileStatReply {
             size: 2048,
             mtime: 1234567890,
+            is_dir: false,
             error: 0,
         };
         let serialized = bincode::serialize(&reply).unwrap();
         let deserialized: FileStatReply = bincode::deserialize(&serialized).unwrap();
         assert_eq!(deserialized.size, 2048);
         assert_eq!(deserialized.mtime, 1234567890);
+        assert!(!deserialized.is_dir);
         assert_eq!(deserialized.error, 0);
     }
 }

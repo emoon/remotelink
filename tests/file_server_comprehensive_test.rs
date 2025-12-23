@@ -55,8 +55,9 @@ fn test_file_server_comprehensive() {
 
     // TEST 2: Stat
     {
-        let (size, _mtime) = client.stat("test3.txt").unwrap();
+        let (size, _mtime, is_dir) = client.stat("test3.txt").unwrap();
         assert_eq!(size, content_3.len() as u64);
+        assert!(!is_dir);
         println!("✓ Stat test3.txt, size={}", size);
     }
 

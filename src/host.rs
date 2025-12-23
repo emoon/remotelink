@@ -1,9 +1,10 @@
 use anyhow::{anyhow, Context, Result};
+use goblin::elf::Elf;
 use log::{debug, info, trace, warn};
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::channel;
 use std::time::Duration;
 
@@ -11,6 +12,102 @@ use crate::file_watcher::FileWatcher;
 use crate::message_stream::{MessageStream, TransitionToRead};
 use crate::messages::*;
 use crate::options::Opt;
+
+/// Resolved library with path
+struct ResolvedLibrary {
+    name: String,
+    path: PathBuf,
+}
+
+/// Parse ELF and extract library names and RUNPATH search paths
+fn parse_elf_libraries(elf_data: &[u8]) -> (Vec<String>, Vec<String>) {
+    let elf = match Elf::parse(elf_data) {
+        Ok(e) => e,
+        Err(e) => {
+            warn!("Failed to parse ELF: {}", e);
+            return (Vec::new(), Vec::new());
+        }
+    };
+
+    let libraries: Vec<String> = elf.libraries.iter().map(|s| s.to_string()).collect();
+
+    // Get RUNPATH entries (or RPATH as fallback), split by ':'
+    let search_paths: Vec<String> = if !elf.runpaths.is_empty() {
+        elf.runpaths
+            .iter()
+            .flat_map(|p| p.split(':'))
+            .filter(|p| !p.is_empty())
+            .map(|s| s.to_string())
+            .collect()
+    } else if !elf.rpaths.is_empty() {
+        elf.rpaths
+            .iter()
+            .flat_map(|p| p.split(':'))
+            .filter(|p| !p.is_empty())
+            .map(|s| s.to_string())
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    debug!(
+        "ELF libraries: {:?}, search paths: {:?}",
+        libraries, search_paths
+    );
+
+    (libraries, search_paths)
+}
+
+/// Filter out system libraries that don't need to be sent
+fn is_system_library(name: &str) -> bool {
+    name.starts_with("libc.so")
+        || name.starts_with("libm.so")
+        || name.starts_with("libpthread.so")
+        || name.starts_with("libdl.so")
+        || name.starts_with("librt.so")
+        || name.starts_with("libgcc")
+        || name.starts_with("libstdc++")
+        || name.starts_with("ld-linux")
+        || name.starts_with("libdrm.so")
+        || name.starts_with("libevdev.so")
+}
+
+/// Resolve library dependencies for an executable.
+/// Libraries are resolved using RUNPATH entries from the ELF.
+fn resolve_library_dependencies(_exe_path: &Path, exe_data: &[u8]) -> Vec<ResolvedLibrary> {
+    let (libraries, search_paths) = parse_elf_libraries(exe_data);
+
+    if libraries.is_empty() {
+        debug!("No library dependencies found");
+        return Vec::new();
+    }
+
+    let mut resolved = Vec::new();
+
+    for lib_name in &libraries {
+        // Skip system libraries
+        if is_system_library(lib_name) {
+            debug!("Skipping system library: {}", lib_name);
+            continue;
+        }
+
+        // Try to find the library in the RUNPATH search paths
+        for search_path in &search_paths {
+            let lib_path = PathBuf::from(search_path).join(lib_name);
+
+            if lib_path.exists() {
+                debug!("Found library {} at {:?}", lib_name, lib_path);
+                resolved.push(ResolvedLibrary {
+                    name: lib_name.clone(),
+                    path: lib_path,
+                });
+                break;
+            }
+        }
+    }
+
+    resolved
+}
 
 fn handshake<T: Write + Read>(stream: &mut T) -> Result<()> {
     let handshake_request = HandshakeRequest {
@@ -137,6 +234,7 @@ fn handle_incoming_msg<S: Write + Read>(
     Ok(Some(true)) // Continue with process running
 }
 
+/// Send libraries and executable to the remote runner
 fn send_file<S: Write + Read>(
     msg_stream: &mut MessageStream,
     stream: &mut S,
@@ -147,6 +245,38 @@ fn send_file<S: Write + Read>(
     let mut f = File::open(filename)?;
     f.read_to_end(&mut buffer)?;
 
+    // If file server is enabled, resolve and send library dependencies first
+    if file_server_enabled {
+        let exe_path = Path::new(filename);
+        let libraries = resolve_library_dependencies(exe_path, &buffer);
+
+        if !libraries.is_empty() {
+            info!("Sending {} library dependencies", libraries.len());
+
+            // Send each library
+            for lib in &libraries {
+                info!("Sending library: {}", lib.name);
+                let lib_data = fs::read(&lib.path)?;
+
+                let lib_request = LibraryDataRequest {
+                    name: &lib.name,
+                    data: &lib_data,
+                };
+
+                msg_stream.begin_write_message(
+                    stream,
+                    &lib_request,
+                    Messages::LibraryDataRequest,
+                    TransitionToRead::Yes,
+                )?;
+
+                // Wait for acknowledgment
+                wait_for_library_data_reply(msg_stream, stream)?;
+            }
+        }
+    }
+
+    // Send the executable
     let file_request = LaunchExecutableRequest {
         file_server: file_server_enabled,
         path: filename,
@@ -161,6 +291,32 @@ fn send_file<S: Write + Read>(
     )?;
 
     Ok(())
+}
+
+/// Wait for LibraryDataReply from remote
+fn wait_for_library_data_reply<S: Write + Read>(
+    msg_stream: &mut MessageStream,
+    stream: &mut S,
+) -> Result<()> {
+    loop {
+        // Call update to handle both pending writes and reads
+        if let Some(msg) = msg_stream.update(stream)? {
+            if msg == Messages::LibraryDataReply {
+                let reply: LibraryDataReply = bincode::deserialize(&msg_stream.data)?;
+                if reply.error != 0 {
+                    warn!("Remote reported error {} saving library", reply.error);
+                }
+                return Ok(());
+            } else {
+                return Err(anyhow!(
+                    "Unexpected message {:?}, expected LibraryDataReply",
+                    msg
+                ));
+            }
+        }
+        // Small sleep to avoid busy-waiting
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
 }
 
 fn close_down_exe<S: Write + Read>(msg_stream: &mut MessageStream, stream: &mut S) -> Result<()> {

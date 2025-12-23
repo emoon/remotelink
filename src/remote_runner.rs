@@ -1,14 +1,12 @@
-use crate::file_client::FileServerClient;
 use crate::message_stream::{MessageStream, TransitionToRead};
 use crate::messages;
 use crate::messages::*;
 use crate::options::*;
 use anyhow::{anyhow, Context as AnyhowContext, Result};
 use core::result::Result::Ok;
-use goblin::elf::Elf;
 use log::{debug, error, info, trace, warn};
 use std::{
-    fs::File,
+    fs::{self, File},
     io::{Read, Write},
     net::{TcpListener, TcpStream},
     path::PathBuf,
@@ -28,142 +26,8 @@ use std::os::unix::fs::PermissionsExt;
 
 type IoOut = Receiver<Vec<u8>>;
 
-/// Parse ELF and extract library names and RUNPATH search paths
-/// Returns (libraries, relative_search_paths)
-fn parse_elf_libraries(elf_data: &[u8]) -> (Vec<String>, Vec<String>) {
-    let elf = match Elf::parse(elf_data) {
-        Ok(e) => e,
-        Err(e) => {
-            warn!("Failed to parse ELF: {}", e);
-            return (Vec::new(), Vec::new());
-        }
-    };
-
-    let libraries: Vec<String> = elf.libraries.iter().map(|s| s.to_string()).collect();
-
-    // Get RUNPATH entries (or RPATH as fallback), split by ':'
-    let search_paths: Vec<&str> = if !elf.runpaths.is_empty() {
-        elf.runpaths.iter().flat_map(|p| p.split(':')).collect()
-    } else if !elf.rpaths.is_empty() {
-        elf.rpaths.iter().flat_map(|p| p.split(':')).collect()
-    } else {
-        Vec::new()
-    };
-
-    // Filter out empty paths
-    let search_paths: Vec<&str> = search_paths.into_iter().filter(|p| !p.is_empty()).collect();
-
-    if search_paths.is_empty() {
-        return (libraries, Vec::new());
-    }
-
-    // Find common prefix among search paths to compute relative paths
-    // The common prefix is the longest path that is a prefix of all search paths
-    let mut common_prefix = search_paths[0];
-    for path in &search_paths[1..] {
-        // Find character-by-character common part
-        let common_len = common_prefix
-            .chars()
-            .zip(path.chars())
-            .take_while(|(a, b)| a == b)
-            .count();
-        common_prefix = &common_prefix[..common_len];
-    }
-
-    // Ensure common prefix ends at a directory boundary
-    // If it doesn't end with '/', trim to last '/'
-    let common_prefix = if common_prefix.ends_with('/') {
-        common_prefix
-    } else {
-        // Check if we're at a full directory (shorter path equals common prefix)
-        // In that case, add trailing slash
-        if search_paths.iter().any(|p| *p == common_prefix) {
-            // One of the paths equals the common prefix, so it's a directory
-            // We need to include the trailing slash
-            Box::leak(format!("{}/", common_prefix).into_boxed_str()) as &str
-        } else {
-            // Trim to last slash
-            common_prefix
-                .rfind('/')
-                .map(|i| &common_prefix[..=i])
-                .unwrap_or("")
-        }
-    };
-
-    // Convert to relative paths
-    let relative_paths: Vec<String> = search_paths
-        .iter()
-        .map(|p| {
-            // Handle case where path equals common prefix (without trailing slash)
-            let common_no_slash = common_prefix.trim_end_matches('/');
-            if *p == common_no_slash {
-                String::new() // Root of file server
-            } else {
-                p.strip_prefix(common_prefix).unwrap_or(p).to_string()
-            }
-        })
-        .collect();
-
-    debug!("RUNPATH relative paths: {:?}", relative_paths);
-
-    (libraries, relative_paths)
-}
-
-/// Pre-fetch library dependencies from file server to local directory
-fn prefetch_libraries(host_addr: &str, exe_data: &[u8], exe_dir: &PathBuf) {
-    let (libraries, search_paths) = parse_elf_libraries(exe_data);
-
-    if libraries.is_empty() || search_paths.is_empty() {
-        debug!("No libraries or search paths found");
-        return;
-    }
-
-    info!(
-        "Found {} libraries, {} search paths",
-        libraries.len(),
-        search_paths.len()
-    );
-
-    let server_addr = format!("{}:8889", host_addr);
-    let client = match FileServerClient::new(&server_addr) {
-        Ok(c) => c,
-        Err(e) => {
-            warn!("Could not connect to file server: {}", e);
-            return;
-        }
-    };
-
-    for lib_name in &libraries {
-        let local_path = exe_dir.join(lib_name);
-
-        // Skip if already exists locally
-        if local_path.exists() {
-            debug!("Library already cached: {}", lib_name);
-            continue;
-        }
-
-        // Try each search path until we find the library
-        for search_path in &search_paths {
-            let remote_path = if search_path.is_empty() {
-                lib_name.clone()
-            } else {
-                format!("{}/{}", search_path, lib_name)
-            };
-
-            // First check if file exists on server (stat is cheaper than download attempt)
-            if client.stat(&remote_path).is_err() {
-                trace!("Library not found at: {}", remote_path);
-                continue;
-            }
-
-            debug!("Found library at: {}, downloading...", remote_path);
-            if client.download_file(&remote_path, &local_path).is_ok() {
-                info!("Downloaded {} from {}", lib_name, remote_path);
-                break;
-            }
-        }
-    }
-}
+/// Cache directory for libraries
+const LIBRARY_CACHE_DIR: &str = "/tmp/remotelink-cache";
 
 struct Context {
     /// Used for tracking running executable.
@@ -253,6 +117,21 @@ impl Context {
         );
     }
 
+    /// Save a library to the cache directory
+    fn save_library(&self, name: &str, data: &[u8]) -> Result<()> {
+        // Create cache directory if needed
+        let cache_dir = PathBuf::from(LIBRARY_CACHE_DIR);
+        if !cache_dir.exists() {
+            fs::create_dir_all(&cache_dir)?;
+        }
+
+        let cache_path = cache_dir.join(name);
+        fs::write(&cache_path, data)?;
+
+        debug!("Saved library {} to {:?}", name, cache_path);
+        Ok(())
+    }
+
     /// Handles incoming messages and sends back reply (if needed) if returns false it means we
     /// should exit the update
     pub fn handle_incoming_msg<S: Write + Read>(
@@ -328,6 +207,38 @@ impl Context {
                 )?;
 
                 return Ok(false);
+            }
+
+            Messages::LibraryDataRequest => {
+                trace!("LibraryDataRequest");
+
+                let request: bincode::Result<messages::LibraryDataRequest> =
+                    bincode::deserialize(&msg_stream.data);
+
+                let error = match request {
+                    Ok(req) => match self.save_library(&req.name, req.data) {
+                        Ok(()) => {
+                            info!("Saved library: {}", req.name);
+                            0
+                        }
+                        Err(e) => {
+                            error!("Failed to save library {}: {}", req.name, e);
+                            -1
+                        }
+                    },
+                    Err(e) => {
+                        error!("Failed to deserialize LibraryDataRequest: {}", e);
+                        -1
+                    }
+                };
+
+                let reply = LibraryDataReply { error };
+                msg_stream.begin_write_message(
+                    stream,
+                    &reply,
+                    Messages::LibraryDataReply,
+                    TransitionToRead::Yes,
+                )?;
             }
 
             Messages::LaunchExecutableRequest => {
@@ -464,19 +375,12 @@ impl Context {
 
         // Set REMOTELINK_FILE_SERVER and LD_PRELOAD environment variables if file server is enabled
         if f.file_server {
-            // Pre-fetch library dependencies before launching
-            // Libraries are cached in the same directory as the executable
-            if let Some(exe_dir) = exe_path.parent() {
-                prefetch_libraries(&self.host_addr, f.data, &exe_dir.to_path_buf());
-
-                // Set LD_LIBRARY_PATH to include the temp directory where libs are cached
-                let exe_dir_str = exe_dir.to_string_lossy();
-                let ld_library_path = std::env::var("LD_LIBRARY_PATH")
-                    .map(|existing| format!("{}:{}", exe_dir_str, existing))
-                    .unwrap_or_else(|_| exe_dir_str.to_string());
-                cmd.env("LD_LIBRARY_PATH", &ld_library_path);
-                info!("Setting LD_LIBRARY_PATH={}", ld_library_path);
-            }
+            // Set LD_LIBRARY_PATH to include the library cache directory
+            let ld_library_path = std::env::var("LD_LIBRARY_PATH")
+                .map(|existing| format!("{}:{}", LIBRARY_CACHE_DIR, existing))
+                .unwrap_or_else(|_| LIBRARY_CACHE_DIR.to_string());
+            cmd.env("LD_LIBRARY_PATH", &ld_library_path);
+            info!("Setting LD_LIBRARY_PATH={}", ld_library_path);
 
             // Use the host IP from the incoming connection for file server
             let file_server = format!("{}:8889", self.host_addr);
