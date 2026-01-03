@@ -21,7 +21,7 @@ fn test_file_server_basic_open_read_close() {
 
     let dir_path = temp_dir.path().to_str().unwrap().to_string();
     let server_handle =
-        remotelink::file_server::start_file_server_on_port(dir_path, PORT_TEST_1).unwrap();
+        remotelink::file_server::start_file_server_on_port(vec![dir_path], PORT_TEST_1).unwrap();
     thread::sleep(Duration::from_millis(300));
 
     let client = FileServerClient::new(&format!("127.0.0.1:{}", PORT_TEST_1)).unwrap();
@@ -49,7 +49,7 @@ fn test_file_server_stat() {
 
     let dir_path = temp_dir.path().to_str().unwrap().to_string();
     let server_handle =
-        remotelink::file_server::start_file_server_on_port(dir_path, PORT_TEST_2).unwrap();
+        remotelink::file_server::start_file_server_on_port(vec![dir_path], PORT_TEST_2).unwrap();
     thread::sleep(Duration::from_millis(300));
 
     let client = FileServerClient::new(&format!("127.0.0.1:{}", PORT_TEST_2)).unwrap();
@@ -69,7 +69,7 @@ fn test_file_server_path_traversal_blocked() {
 
     let dir_path = temp_dir.path().to_str().unwrap().to_string();
     let server_handle =
-        remotelink::file_server::start_file_server_on_port(dir_path, PORT_TEST_3).unwrap();
+        remotelink::file_server::start_file_server_on_port(vec![dir_path], PORT_TEST_3).unwrap();
     thread::sleep(Duration::from_millis(300));
 
     let client = FileServerClient::new(&format!("127.0.0.1:{}", PORT_TEST_3)).unwrap();
@@ -91,7 +91,7 @@ fn test_file_server_missing_file() {
 
     let dir_path = temp_dir.path().to_str().unwrap().to_string();
     let server_handle =
-        remotelink::file_server::start_file_server_on_port(dir_path, PORT_TEST_4).unwrap();
+        remotelink::file_server::start_file_server_on_port(vec![dir_path], PORT_TEST_4).unwrap();
     thread::sleep(Duration::from_millis(300));
 
     let client = FileServerClient::new(&format!("127.0.0.1:{}", PORT_TEST_4)).unwrap();
@@ -114,7 +114,7 @@ fn test_file_server_partial_read() {
 
     let dir_path = temp_dir.path().to_str().unwrap().to_string();
     let server_handle =
-        remotelink::file_server::start_file_server_on_port(dir_path, PORT_TEST_5).unwrap();
+        remotelink::file_server::start_file_server_on_port(vec![dir_path], PORT_TEST_5).unwrap();
     thread::sleep(Duration::from_millis(300));
 
     let client = FileServerClient::new(&format!("127.0.0.1:{}", PORT_TEST_5)).unwrap();

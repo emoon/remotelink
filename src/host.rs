@@ -494,10 +494,28 @@ fn restart_executable<S: Write + Read>(
 }
 
 pub fn host_loop(opts: &Opt, ip_address: &str) -> Result<()> {
-    // Start file server if --file-dir is specified
-    let _file_server_handle = if let Some(ref file_dir) = opts.file_dir {
+    // Build list of directories to serve
+    let mut file_dirs = opts.file_dir.clone();
+
+    // Auto-mount executable's parent directory if enabled (default: true)
+    if opts.auto_mount_exe_dir {
+        if let Some(ref filename) = opts.filename {
+            if let Some(parent) = Path::new(filename).parent() {
+                if let Ok(canonical) = parent.canonicalize() {
+                    let parent_str = canonical.to_string_lossy().to_string();
+                    if !file_dirs.contains(&parent_str) {
+                        info!("Auto-mounting executable directory: {}", parent_str);
+                        file_dirs.push(parent_str);
+                    }
+                }
+            }
+        }
+    }
+
+    // Start file server if we have directories to serve
+    let _file_server_handle = if !file_dirs.is_empty() {
         std::env::set_var("REMOTELINK_FILE_SERVER_ENABLED", "1");
-        Some(crate::file_server::start_file_server(file_dir.clone())?)
+        Some(crate::file_server::start_file_server(file_dirs)?)
     } else {
         None
     };
@@ -537,7 +555,7 @@ pub fn host_loop(opts: &Opt, ip_address: &str) -> Result<()> {
 
     // read file to be sent
     if let Some(target) = opts.filename.as_ref() {
-        let file_server_enabled = opts.file_dir.is_some();
+        let file_server_enabled = std::env::var("REMOTELINK_FILE_SERVER_ENABLED").is_ok();
         send_file(&mut msg_stream, &mut stream, target, file_server_enabled)?;
         process_running = true;
     }

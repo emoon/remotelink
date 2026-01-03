@@ -29,7 +29,7 @@ fn test_file_server_comprehensive() {
 
     // Start file server
     let dir_path = temp_dir.path().to_str().unwrap().to_string();
-    let server_handle = remotelink::file_server::start_file_server(dir_path).unwrap();
+    let server_handle = remotelink::file_server::start_file_server(vec![dir_path]).unwrap();
 
     // Give server time to start
     thread::sleep(Duration::from_millis(300));

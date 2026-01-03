@@ -19,7 +19,7 @@ fn test_ld_preload_file_interception() {
 
     // Start file server
     let dir_path = temp_dir.path().to_str().unwrap().to_string();
-    let server_handle = remotelink::file_server::start_file_server(dir_path).unwrap();
+    let server_handle = remotelink::file_server::start_file_server(vec![dir_path]).unwrap();
     println!(
         "✓ Started file server serving: {}",
         temp_dir.path().display()

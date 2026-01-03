@@ -41,6 +41,9 @@ pub struct Opt {
     /// Watch the executable file for changes and automatically restart when modified
     pub watch: bool,
     #[arg(long)]
-    /// Directory to serve files from (enables file server on port 8889)
-    pub file_dir: Option<String>,
+    /// Directory to serve files from (enables file server on port 8889). Can be specified multiple times.
+    pub file_dir: Vec<String>,
+    #[arg(long, default_value = "true")]
+    /// Auto-mount the executable's parent directory for file serving
+    pub auto_mount_exe_dir: bool,
 }

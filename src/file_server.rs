@@ -25,42 +25,45 @@ struct OpenFile {
 
 /// File server state shared across connections
 struct FileServerState {
-    base_dir: PathBuf,
+    base_dirs: Vec<PathBuf>,
     next_handle: u32,
     open_files: HashMap<u32, OpenFile>,
 }
 
 impl FileServerState {
-    fn new(base_dir: PathBuf) -> Self {
+    fn new(base_dirs: Vec<PathBuf>) -> Self {
         Self {
-            base_dir,
+            base_dirs,
             next_handle: 1,
             open_files: HashMap::new(),
         }
     }
 
-    /// Validates and canonicalizes a path relative to base_dir
-    /// Returns error if path contains ".." or escapes base_dir
+    /// Validates and canonicalizes a path relative to one of the base directories
+    /// Returns error if path contains ".." or escapes all base directories
     fn validate_path(&self, rel_path: &str) -> Result<PathBuf> {
         // Reject paths with ".." to prevent traversal attacks
         if rel_path.contains("..") {
             return Err(anyhow!("Path traversal not allowed"));
         }
 
-        // Build full path
-        let full_path = self.base_dir.join(rel_path);
+        // Try each base directory
+        for base_dir in &self.base_dirs {
+            let full_path = base_dir.join(rel_path);
 
-        // Canonicalize to resolve symlinks and check if within base_dir
-        let canonical = full_path
-            .canonicalize()
-            .with_context(|| format!("Failed to canonicalize path: {:?}", full_path))?;
-
-        // Ensure canonical path is still within base_dir
-        if !canonical.starts_with(&self.base_dir) {
-            return Err(anyhow!("Path escapes base directory"));
+            // Canonicalize to resolve symlinks and check if within base_dir
+            if let Ok(canonical) = full_path.canonicalize() {
+                // Ensure canonical path is still within this base_dir
+                if canonical.starts_with(base_dir) {
+                    return Ok(canonical);
+                }
+            }
         }
 
-        Ok(canonical)
+        Err(anyhow!(
+            "File not found in any served directory: {}",
+            rel_path
+        ))
     }
 
     /// Opens a file and returns a handle
@@ -400,40 +403,53 @@ fn handle_file_client(mut stream: TcpStream, state: Arc<Mutex<FileServerState>>)
 }
 
 /// Starts the file server in a background thread
-pub fn start_file_server(base_dir: String) -> Result<thread::JoinHandle<()>> {
-    start_file_server_on_port(base_dir, FILE_SERVER_PORT)
+pub fn start_file_server(base_dirs: Vec<String>) -> Result<thread::JoinHandle<()>> {
+    start_file_server_on_port(base_dirs, FILE_SERVER_PORT)
 }
 
 /// Starts the file server on a specific port (for testing)
-pub fn start_file_server_on_port(base_dir: String, port: u16) -> Result<thread::JoinHandle<()>> {
-    let base_path = PathBuf::from(&base_dir);
-
-    // Validate base directory exists
-    if !base_path.exists() {
-        return Err(anyhow!(
-            "File server directory does not exist: {:?}",
-            base_path
-        ));
+pub fn start_file_server_on_port(
+    base_dirs: Vec<String>,
+    port: u16,
+) -> Result<thread::JoinHandle<()>> {
+    if base_dirs.is_empty() {
+        return Err(anyhow!("No directories specified for file server"));
     }
 
-    if !base_path.is_dir() {
-        return Err(anyhow!(
-            "File server path is not a directory: {:?}",
-            base_path
-        ));
-    }
+    let mut canonical_dirs = Vec::new();
 
-    // Canonicalize to get absolute path
-    let canonical_base = base_path
-        .canonicalize()
-        .with_context(|| format!("Failed to canonicalize base directory: {:?}", base_path))?;
+    for base_dir in &base_dirs {
+        let base_path = PathBuf::from(base_dir);
+
+        // Validate base directory exists
+        if !base_path.exists() {
+            return Err(anyhow!(
+                "File server directory does not exist: {:?}",
+                base_path
+            ));
+        }
+
+        if !base_path.is_dir() {
+            return Err(anyhow!(
+                "File server path is not a directory: {:?}",
+                base_path
+            ));
+        }
+
+        // Canonicalize to get absolute path
+        let canonical_base = base_path
+            .canonicalize()
+            .with_context(|| format!("Failed to canonicalize base directory: {:?}", base_path))?;
+
+        canonical_dirs.push(canonical_base);
+    }
 
     info!(
         "Starting file server on port {} serving {:?}",
-        port, canonical_base
+        port, canonical_dirs
     );
 
-    let state = Arc::new(Mutex::new(FileServerState::new(canonical_base)));
+    let state = Arc::new(Mutex::new(FileServerState::new(canonical_dirs)));
 
     let handle = thread::Builder::new()
         .name("file_server".to_string())

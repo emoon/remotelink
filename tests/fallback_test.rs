@@ -30,7 +30,7 @@ fn test_local_first_fallback() {
 
     // Start file server serving remote_dir
     let dir_path = remote_dir.path().to_str().unwrap().to_string();
-    let server_handle = remotelink::file_server::start_file_server(dir_path).unwrap();
+    let server_handle = remotelink::file_server::start_file_server(vec![dir_path]).unwrap();
     println!(
         "Started file server serving: {}",
         remote_dir.path().display()
