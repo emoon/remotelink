@@ -182,6 +182,10 @@ pub struct DirEntry {
     pub name: String,
     /// True if this is a directory
     pub is_dir: bool,
+    /// File size in bytes
+    pub size: u64,
+    /// Last modification time (Unix timestamp)
+    pub mtime: i64,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

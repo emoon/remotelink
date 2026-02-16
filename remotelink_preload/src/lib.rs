@@ -28,6 +28,10 @@ static CACHED_FILES: Mutex<Option<HashSet<PathBuf>>> = Mutex::new(None);
 // Maps DIR* pointer value to (entries, current_index)
 static DIR_STATE: Mutex<Option<HashMap<usize, DirState>>> = Mutex::new(None);
 
+// Stat cache populated from readdir results to avoid per-file stat round trips
+// Maps full path (e.g. "/host/src/main.c") to (size, mtime, is_dir)
+static STAT_CACHE: Mutex<Option<HashMap<String, (u64, i64, bool)>>> = Mutex::new(None);
+
 struct DirState {
     entries: Vec<remotelink_client::DirEntry>,
     index: usize,
@@ -51,6 +55,9 @@ fn initialize() {
 
     // Initialize directory state map
     *DIR_STATE.lock().unwrap() = Some(HashMap::new());
+
+    // Initialize stat cache
+    *STAT_CACHE.lock().unwrap() = Some(HashMap::new());
 
     // Initialize connection if REMOTELINK_FILE_SERVER is set
     if let Ok(addr) = std::env::var("REMOTELINK_FILE_SERVER") {
@@ -474,6 +481,23 @@ fn handle_remote_lseek(fd: c_int, offset: i64, whence: c_int) -> i64 {
 
 /// Handle remote stat operation
 fn handle_remote_stat(path: &str, statbuf: *mut libc::stat) -> c_int {
+    // Check stat cache first (populated by readdir results)
+    if let Some(cache) = STAT_CACHE.lock().unwrap().as_ref() {
+        if let Some(&(size, mtime, is_dir)) = cache.get(path) {
+            unsafe {
+                std::ptr::write_bytes(statbuf, 0, 1);
+                (*statbuf).st_size = size as i64;
+                (*statbuf).st_mtime = mtime;
+                (*statbuf).st_mode = if is_dir {
+                    libc::S_IFDIR | 0o755
+                } else {
+                    libc::S_IFREG | 0o644
+                };
+            }
+            return 0;
+        }
+    }
+
     let conn_guard = CONNECTION.lock().unwrap();
     let conn = match conn_guard.as_ref() {
         Some(c) => c,
@@ -602,6 +626,20 @@ pub(crate) fn handle_remote_opendir(path: &str) -> *mut libc::DIR {
     match conn.readdir(rel_path) {
         Ok(entries) => {
             drop(conn_guard);
+
+            // Cache stat info from readdir results to avoid per-file stat round trips
+            if let Some(cache) = STAT_CACHE.lock().unwrap().as_mut() {
+                // Also cache the directory itself
+                cache.insert(path.to_string(), (0, 0, true));
+                for entry in &entries {
+                    let entry_path = if path.ends_with('/') {
+                        format!("{}{}", path, entry.name)
+                    } else {
+                        format!("{}/{}", path, entry.name)
+                    };
+                    cache.insert(entry_path, (entry.size, entry.mtime, entry.is_dir));
+                }
+            }
 
             // Create a fake DIR pointer using Box
             let fake_dir = Box::new(0u8);
